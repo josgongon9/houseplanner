@@ -1,52 +1,112 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '../context/StoreContext';
-import { Plus, DollarSign, TrendingUp, Calendar, User, ArrowRightLeft, Check, X } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { Plus, DollarSign, TrendingUp, Calendar, User, ArrowRightLeft, Check, X, ChevronLeft, ChevronRight, Lock, Unlock, Grid, PieChart as PieChartIcon, Trash, Edit, Divide, Percent } from 'lucide-react';
+import { format, parseISO, startOfMonth, endOfMonth, subMonths, addMonths, isSameMonth, startOfYear, endOfYear, eachMonthOfInterval, isFuture, isPast, isThisMonth, addYears, subYears } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip as RechartsTooltip } from 'recharts';
 
 export default function Expenses() {
-    const { expenses, addExpense, householdMembers, user } = useStore();
-    const [activeTab, setActiveTab] = useState('expenses'); // 'expenses' | 'balances'
+    const { expenses, addExpense, updateExpense, deleteExpense, householdMembers, user } = useStore();
+    const [viewMode, setViewMode] = useState('month'); // 'month' | 'year'
+    const [activeTab, setActiveTab] = useState('expenses'); // 'expenses' | 'balances' | 'charts'
+    const [currentMonth, setCurrentMonth] = useState(new Date());
+
+    // Modal State
     const [showAdd, setShowAdd] = useState(false);
+    const [editingId, setEditingId] = useState(null); // ID of expense being edited
 
     // Form State
     const [title, setTitle] = useState("");
     const [amount, setAmount] = useState("");
-    const [category, setCategory] = useState("groceries");
+    const [category, setCategory] = useState("");
     const [payerId, setPayerId] = useState(user?.uid || "");
     const [splitAmong, setSplitAmong] = useState([]); // Array of UIDs
+    const [splitMode, setSplitMode] = useState('equal'); // 'equal' | 'custom'
+    const [customAmounts, setCustomAmounts] = useState({}); // { uid: amount }
 
-    // Group expenses by month
-    const groupedExpenses = useMemo(() => {
-        const groups = {};
-        expenses.forEach(exp => {
-            const date = parseISO(exp.date);
-            const key = format(date, 'MMMM yyyy', { locale: es });
-            if (!groups[key]) groups[key] = [];
-            groups[key].push(exp);
-        });
-        return groups;
-    }, [expenses]);
+    // Filter expenses by selected month
+    const monthlyExpenses = useMemo(() => {
+        return expenses.filter(exp => isSameMonth(parseISO(exp.date), currentMonth));
+    }, [expenses, currentMonth]);
 
-    // Handle opening modal (reset split default to all members)
+    // Handle opening modal for CREATE
     const handleOpenAdd = () => {
+        setEditingId(null);
         setSplitAmong(householdMembers.map(m => m.id));
         setPayerId(user.uid);
         setTitle("");
         setAmount("");
+        setCategory("");
+        setSplitMode('equal');
+        setCustomAmounts({});
         setShowAdd(true);
     }
 
-    const handleSubmit = (e) => {
+    // Handle opening modal for EDIT
+    const handleEdit = (exp) => {
+        setEditingId(exp.id);
+        setTitle(exp.title);
+        setAmount(exp.amount);
+        setCategory(exp.category);
+        setPayerId(exp.payerId);
+        setSplitAmong(exp.splitAmong || []);
+        setSplitMode(exp.splitMode || 'equal');
+        setCustomAmounts(exp.customAmounts || {});
+        setShowAdd(true);
+    }
+
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!title || !amount) return;
-        addExpense(title, amount, category, payerId, splitAmong);
+        if (!title || !amount || !category) return;
+        if (Number(amount) <= 0) return;
+
+        // Custom Split Validation
+        if (splitMode === 'custom') {
+            const sum = Object.values(customAmounts).reduce((acc, curr) => acc + Number(curr), 0);
+            if (Math.abs(sum - Number(amount)) > 0.05) {
+                // Should be handled by UI disable state, but double check
+                return;
+            }
+        }
+
+        const data = {
+            title,
+            amount,
+            category,
+            payerId,
+            splitAmong: splitMode === 'equal' ? splitAmong : Object.keys(customAmounts).filter(k => Number(customAmounts[k]) > 0),
+            splitMode,
+            customAmounts: splitMode === 'custom' ? customAmounts : {}
+        };
+
+        if (editingId) {
+            await updateExpense(editingId, data);
+        } else {
+            await addExpense(data.title, data.amount, data.category, data.payerId, data.splitAmong, data.splitMode, data.customAmounts);
+        }
         setShowAdd(false);
+        setEditingId(null);
     };
+
+    const handleDelete = async () => {
+        if (!editingId) return;
+        if (confirm("¿Seguro que quieres eliminar este gasto?")) {
+            await deleteExpense(editingId);
+            setShowAdd(false);
+            setEditingId(null);
+        }
+    }
+
+    const handleSettleUp = (debtor, creditor, amount) => {
+        const confirmMsg = `¿Confirmar que ${debtor.displayName} ha pagado ${amount.toFixed(2)}€ a ${creditor.displayName}?`;
+        if (window.confirm(confirmMsg)) {
+            const settlementTitle = `Liquidación ${format(currentMonth, 'MMMM', { locale: es })}`;
+            addExpense(settlementTitle, amount, 'settlement', debtor.id, [creditor.id]);
+        }
+    }
 
     const toggleSplitMember = (memberId) => {
         if (splitAmong.includes(memberId)) {
-            // Prevent removing if only 1 person left (cannot split with no one)
             if (splitAmong.length > 1) {
                 setSplitAmong(splitAmong.filter(id => id !== memberId));
             }
@@ -55,32 +115,46 @@ export default function Expenses() {
         }
     }
 
+    const handleCustomAmountChange = (uid, val) => {
+        setCustomAmounts(prev => ({
+            ...prev,
+            [uid]: val
+        }));
+    }
+
+    const customSum = useMemo(() => {
+        return Object.values(customAmounts).reduce((acc, curr) => acc + (Number(curr) || 0), 0);
+    }, [customAmounts]);
+
+    const isValidCustom = Math.abs(customSum - Number(amount)) < 0.05;
+
     // --- BALANCES LOGIC (Tricount Style) ---
     const balances = useMemo(() => {
         const balanceMap = {}; // uid -> amount (positive = owed, negative = owes)
-
-        // Initialize 0
         householdMembers.forEach(m => balanceMap[m.id] = 0);
 
-        expenses.forEach(exp => {
+        monthlyExpenses.forEach(exp => {
             const cost = exp.amount;
             const payer = exp.payerId;
-            const beneficiaries = exp.splitAmong || []; // Fallback for old data?
+            const beneficiaries = exp.splitAmong || []; // UIDs involved
 
-            if (beneficiaries.length === 0) return; // Verified data only
-
-            const splitAmount = cost / beneficiaries.length;
-
-            // Payer paid full amount (+Credit)
             balanceMap[payer] = (balanceMap[payer] || 0) + cost;
 
-            // Beneficiaries consumed share (-Debit)
-            beneficiaries.forEach(uid => {
-                balanceMap[uid] = (balanceMap[uid] || 0) - splitAmount;
-            });
+            if (exp.splitMode === 'custom' && exp.customAmounts) {
+                // Custom Split
+                Object.entries(exp.customAmounts).forEach(([uid, amt]) => {
+                    balanceMap[uid] = (balanceMap[uid] || 0) - Number(amt);
+                });
+            } else {
+                // Equal Split (Default)
+                if (beneficiaries.length === 0) return;
+                const splitAmount = cost / beneficiaries.length;
+                beneficiaries.forEach(uid => {
+                    balanceMap[uid] = (balanceMap[uid] || 0) - splitAmount;
+                });
+            }
         });
 
-        // Transform to array
         return Object.entries(balanceMap)
             .map(([uid, amount]) => ({
                 uid,
@@ -88,12 +162,11 @@ export default function Expenses() {
                 member: householdMembers.find(m => m.id === uid)
             }))
             .sort((a, b) => b.amount - a.amount);
-    }, [expenses, householdMembers]);
+    }, [monthlyExpenses, householdMembers]);
 
     // Calculate simple debts (Who pays whom)
     const transactions = useMemo(() => {
         let debtList = [];
-        // Deep copy to avoid mutating state display
         let bals = balances.map(b => ({ ...b }));
 
         let i = 0;
@@ -103,7 +176,6 @@ export default function Expenses() {
             let debtor = bals[j];  // Most negative
             let creditor = bals[i]; // Most positive
 
-            // Floating point protection
             if (Math.abs(debtor.amount) < 0.01) { j--; continue; }
             if (Math.abs(creditor.amount) < 0.01) { i++; continue; }
 
@@ -124,257 +196,559 @@ export default function Expenses() {
         return debtList;
     }, [balances]);
 
+    const totalMonthly = monthlyExpenses
+        .filter(e => e.category !== 'settlement')
+        .reduce((acc, curr) => acc + curr.amount, 0);
+
+    const isSettled = transactions.length === 0 && monthlyExpenses.length > 0;
+
+    // --- YEAR OVERVIEW DATA ---
+    const yearMonths = useMemo(() => {
+        const start = startOfYear(currentMonth);
+        const end = endOfYear(currentMonth);
+        return eachMonthOfInterval({ start, end });
+    }, [currentMonth]);
+
+    const getMonthTotal = (monthDate) => {
+        return expenses
+            .filter(e => isSameMonth(parseISO(e.date), monthDate) && e.category !== 'settlement')
+            .reduce((acc, curr) => acc + curr.amount, 0);
+    };
+
+    // --- CHART DATA ---
+    const chartData = useMemo(() => {
+        const data = {
+            groceries: 0,
+            dining: 0,
+            transport: 0,
+            home: 0,
+            other: 0
+        };
+
+        monthlyExpenses.forEach(e => {
+            if (e.category === 'settlement') return;
+            if (data[e.category] !== undefined) {
+                data[e.category] += e.amount;
+            } else {
+                data.other = (data.other || 0) + e.amount;
+            }
+        });
+
+        const categoriesMap = {
+            groceries: { name: 'Supermercado', color: '#F97316' }, // Orange 500
+            dining: { name: 'Restaurante', color: '#3B82F6' }, // Blue 500
+            transport: { name: 'Transporte', color: '#8B5CF6' }, // Violet 500
+            home: { name: 'Hogar', color: '#F59E0B' }, // Amber 500
+            other: { name: 'Otro', color: '#64748B' } // Slate 500
+        };
+
+        return Object.entries(data)
+            .filter(([key, value]) => value > 0)
+            .map(([key, value]) => ({
+                name: categoriesMap[key]?.name || 'Otro',
+                value,
+                color: categoriesMap[key]?.color || '#64748B'
+            }))
+            .sort((a, b) => b.value - a.value);
+    }, [monthlyExpenses]);
 
     return (
         <div className="p-4 space-y-4 pb-24">
-            <header className="flex justify-between items-center">
+
+            <header className="flex justify-between items-center mb-2">
                 <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-400 to-teal-600 bg-clip-text text-transparent">Gastos</h1>
-                <button
-                    onClick={handleOpenAdd}
-                    className="bg-emerald-500 hover:bg-emerald-600 text-white p-2 rounded-full shadow-lg transition-transform active:scale-95"
-                >
-                    <Plus size={24} />
-                </button>
+                <div className="flex gap-2">
+                    <button
+                        onClick={() => setViewMode(viewMode === 'day' ? 'year' : viewMode === 'year' ? 'month' : 'year')}
+                        className={`p-2 rounded-full transition-colors ${viewMode === 'year' ? 'bg-emerald-500 text-white shadow' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+                        title={viewMode === 'year' ? "Ver Mes" : "Ver Año"}
+                    >
+                        {viewMode === 'year' ? <Calendar size={20} /> : <Grid size={20} />}
+                    </button>
+                    {!showAdd && viewMode === 'month' && (
+                        <button
+                            onClick={handleOpenAdd}
+                            className="bg-emerald-500 hover:bg-emerald-600 text-white p-2 rounded-full shadow-lg transition-transform active:scale-95"
+                        >
+                            <Plus size={24} />
+                        </button>
+                    )}
+                </div>
             </header>
 
-            {/* Tabs */}
-            <div className="flex gap-2 p-1 bg-surface border border-slate-700 rounded-xl">
+            {/* Navigation Header */}
+            <div className="flex items-center justify-between bg-surface p-2 rounded-xl border border-slate-700">
                 <button
-                    onClick={() => setActiveTab('expenses')}
-                    className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === 'expenses' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                    onClick={() => setCurrentMonth(viewMode === 'year' ? subYears(currentMonth, 1) : subMonths(currentMonth, 1))}
+                    className="p-2 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white"
                 >
-                    Listado
+                    <ChevronLeft size={20} />
                 </button>
+                <div className="text-center flex flex-col items-center">
+                    <button
+                        onClick={() => setCurrentMonth(new Date())}
+                        className="font-bold capitalize text-lg hover:text-emerald-400 transition-colors flex items-center gap-2"
+                    >
+                        {viewMode === 'year' ? format(currentMonth, 'yyyy') : format(currentMonth, 'MMMM yyyy', { locale: es })}
+                        {!isSameMonth(currentMonth, new Date()) && (
+                            <span className="bg-emerald-500/20 text-emerald-400 text-[10px] px-1.5 py-0.5 rounded-full border border-emerald-500/30">
+                                Hoy
+                            </span>
+                        )}
+                    </button>
+                    {viewMode === 'month' && (
+                        isSettled ? (
+                            <span className="text-[10px] text-green-400 font-bold bg-green-500/10 px-2 py-0.5 rounded-full border border-green-500/30 flex items-center gap-1 justify-center mx-auto w-max mt-1">
+                                <Lock size={10} /> CERRADO
+                            </span>
+                        ) : (
+                            <span className="text-[10px] text-slate-400 font-medium block mt-1">
+                                Total: {totalMonthly.toFixed(0)}€
+                            </span>
+                        )
+                    )}
+                </div>
                 <button
-                    onClick={() => setActiveTab('balances')}
-                    className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === 'balances' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                    onClick={() => setCurrentMonth(viewMode === 'year' ? addYears(currentMonth, 1) : addMonths(currentMonth, 1))}
+                    className="p-2 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white"
                 >
-                    Saldos
+                    <ChevronRight size={20} />
                 </button>
             </div>
 
-            {/* --- ADD EXPENSE MODAL --- */}
-            {showAdd && (
-                <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-0 sm:p-4">
-                    <form onSubmit={handleSubmit} className="bg-surface w-full max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col shadow-2xl animate-in slide-in-from-bottom-10 max-h-[90vh] overflow-y-auto">
-                        <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900/50 rounded-t-2xl">
-                            <h3 className="font-bold text-lg text-emerald-400">Nuevo Gasto</h3>
-                            <button type="button" onClick={() => setShowAdd(false)} className="p-2 bg-slate-800 rounded-full"><X size={20} /></button>
-                        </div>
+            {/* === YEAR OVERVIEW === */}
+            {viewMode === 'year' && (
+                <div className="grid grid-cols-3 gap-3 animate-in fade-in zoom-in-95 duration-200">
+                    {yearMonths.map(month => {
+                        const mTotal = getMonthTotal(month);
+                        const isCurrent = isThisMonth(month);
+                        const isPassed = isPast(month) && !isCurrent;
+                        const isFut = isFuture(month);
 
-                        <div className="p-4 space-y-4">
-                            {/* Amount & Title */}
-                            <div className="flex gap-4">
-                                <div className="flex-1">
-                                    <label className="block text-xs font-medium text-slate-400 mb-1">Concepto</label>
-                                    <input
-                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 focus:border-emerald-500 outline-none"
-                                        value={title} onChange={e => setTitle(e.target.value)} placeholder="Ej. Compra" autoFocus required
-                                    />
+                        return (
+                            <button
+                                key={month.toString()}
+                                onClick={() => { setCurrentMonth(month); setViewMode('month'); }}
+                                disabled={isFut}
+                                className={`
+                                    p-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all
+                                    ${isCurrent ? 'bg-emerald-500/20 border-emerald-500 ring-1 ring-emerald-500' : ''}
+                                    ${isPassed ? 'bg-surface border-slate-700 hover:border-emerald-500/50' : ''}
+                                    ${isFut ? 'opacity-30 border-slate-800 cursor-not-allowed' : ''}
+                                `}
+                            >
+                                <span className={`text-xs font-bold uppercase ${isCurrent ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                    {format(month, 'MMM', { locale: es })}
+                                </span>
+                                {(!isFut || isCurrent) && (
+                                    <span className={`text-sm font-bold ${mTotal > 0 ? 'text-white' : 'text-slate-600'}`}>
+                                        {mTotal.toFixed(0)}€
+                                    </span>
+                                )}
+                                {isPassed && mTotal > 0 && <Check size={12} className="text-emerald-500 absolute top-2 right-2 opacity-50" />}
+                            </button>
+                        )
+                    })}
+                </div>
+            )}
+
+            {/* === MONTH VIEW CONTENT === */}
+            {viewMode === 'month' && (
+                <>
+                    {/* Tabs */}
+                    <div className="flex gap-2 p-1 bg-surface border border-slate-700 rounded-xl">
+                        <button
+                            onClick={() => setActiveTab('expenses')}
+                            className={`flex-1 py-1.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'expenses' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                        >
+                            Listado ({monthlyExpenses.length})
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('charts')}
+                            className={`flex-1 py-1.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'charts' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                        >
+                            Gráficos
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('balances')}
+                            className={`flex-1 py-1.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'balances' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                        >
+                            Saldos {transactions.length > 0 && <span className="ml-1 w-2 h-2 bg-red-500 rounded-full inline-block"></span>}
+                        </button>
+                    </div>
+
+                    {/* --- ADD/EDIT EXPENSE MODAL --- */}
+                    {showAdd && (
+                        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-0 sm:p-4">
+                            <form onSubmit={handleSubmit} className="bg-surface w-full max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col shadow-2xl animate-in slide-in-from-bottom-10 max-h-[90vh] overflow-y-auto">
+                                <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900/50 rounded-t-2xl">
+                                    <h3 className="font-bold text-lg text-emerald-400">
+                                        {editingId ? 'Editar Gasto' : 'Nuevo Gasto'}
+                                    </h3>
+                                    <button type="button" onClick={() => setShowAdd(false)} className="p-2 bg-slate-800 rounded-full"><X size={20} /></button>
                                 </div>
-                                <div className="w-32">
-                                    <label className="block text-xs font-medium text-slate-400 mb-1">Importe</label>
-                                    <div className="relative">
-                                        <span className="absolute left-3 top-3 text-emerald-500">€</span>
-                                        <input
-                                            type="number" step="0.01" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 pl-7 focus:border-emerald-500 outline-none text-right font-bold"
-                                            value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" required
-                                        />
+
+                                <div className="p-4 space-y-4">
+                                    {/* Amount & Title */}
+                                    <div className="flex gap-4">
+                                        <div className="flex-1">
+                                            <label className="block text-xs font-medium text-slate-400 mb-1">Concepto *</label>
+                                            <input
+                                                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 focus:border-emerald-500 outline-none"
+                                                value={title} onChange={e => setTitle(e.target.value)} placeholder="Ej. Compra" autoFocus required
+                                            />
+                                        </div>
+                                        <div className="w-32">
+                                            <label className="block text-xs font-medium text-slate-400 mb-1">Importe *</label>
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-3 text-emerald-500">€</span>
+                                                <input
+                                                    type="number" step="0.01" min="0.01" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 pl-7 focus:border-emerald-500 outline-none text-right font-bold"
+                                                    value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" required
+                                                />
+                                            </div>
+                                        </div>
                                     </div>
-                                </div>
-                            </div>
 
-                            {/* Category */}
-                            <div>
-                                <label className="block text-xs font-medium text-slate-400 mb-1">Categoría</label>
-                                <select
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none"
-                                    value={category} onChange={e => setCategory(e.target.value)}
-                                >
-                                    <option value="groceries">🛒 Supermercado</option>
-                                    <option value="dining">🍽️ Restaurante</option>
-                                    <option value="transport">🚗 Transporte</option>
-                                    <option value="home">🏠 Hogar</option>
-                                    <option value="other">📦 Otro</option>
-                                </select>
-                            </div>
-
-                            {/* Payer */}
-                            <div>
-                                <label className="block text-xs font-medium text-slate-400 mb-1">Pagado por</label>
-                                <div className="bg-slate-900 border border-slate-700 rounded-xl p-2 flex gap-2 overflow-x-auto">
-                                    {householdMembers.map(m => (
-                                        <button
-                                            type="button"
-                                            key={m.id}
-                                            onClick={() => setPayerId(m.id)}
-                                            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors whitespace-nowrap border ${payerId === m.id ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50' : 'bg-transparent text-slate-400 border-transparent hover:bg-slate-800'
-                                                }`}
+                                    {/* Category */}
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-400 mb-1">Categoría *</label>
+                                        <select
+                                            className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none"
+                                            value={category} onChange={e => setCategory(e.target.value)}
+                                            required
                                         >
-                                            <Avatar url={m.photoURL} name={m.displayName} size="xs" />
-                                            <span className="text-sm font-medium">{m.displayName?.split(' ')[0]}</span>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
+                                            <option value="" disabled>Selecciona una categoría</option>
+                                            <option value="groceries">🛒 Supermercado</option>
+                                            <option value="dining">🍽️ Restaurante</option>
+                                            <option value="transport">🚗 Transporte</option>
+                                            <option value="home">🏠 Hogar</option>
+                                            <option value="settlement">🤝 Liquidación</option>
+                                            <option value="other">📦 Otro</option>
+                                        </select>
+                                    </div>
 
-                            {/* Split */}
-                            <div>
-                                <label className="block text-xs font-medium text-slate-400 mb-2">Para quién (Division)</label>
-                                <div className="grid grid-cols-2 gap-2">
-                                    {householdMembers.map(m => {
-                                        const isSelected = splitAmong.includes(m.id);
-                                        return (
+                                    {/* Payer */}
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-400 mb-1">Pagado por</label>
+                                        <div className="bg-slate-900 border border-slate-700 rounded-xl p-2 flex gap-2 overflow-x-auto">
+                                            {householdMembers.map(m => (
+                                                <button
+                                                    type="button"
+                                                    key={m.id}
+                                                    onClick={() => setPayerId(m.id)}
+                                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors whitespace-nowrap border ${payerId === m.id ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50' : 'bg-transparent text-slate-400 border-transparent hover:bg-slate-800'
+                                                        }`}
+                                                >
+                                                    <Avatar url={m.photoURL} name={m.displayName} size="xs" />
+                                                    <span className="text-sm font-medium">{m.displayName?.split(' ')[0]}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Split Mode Toggle */}
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-400 mb-2">Para quién (Division)</label>
+                                        <div className="bg-slate-900 p-1 rounded-xl mb-3 flex text-sm">
                                             <button
                                                 type="button"
-                                                key={m.id}
-                                                onClick={() => toggleSplitMember(m.id)}
-                                                className={`flex items-center justify-between p-3 rounded-xl border transition-all ${isSelected ? 'bg-slate-800 border-emerald-500/50 text-white' : 'bg-slate-900 border-slate-800 text-slate-500 opacity-70'
-                                                    }`}
+                                                onClick={() => setSplitMode('equal')}
+                                                className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-2 transition-colors ${splitMode === 'equal' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                                             >
-                                                <div className="flex items-center gap-2">
-                                                    <Avatar url={m.photoURL} name={m.displayName} size="xs" />
-                                                    <span className="text-sm">{m.displayName?.split(' ')[0]}</span>
-                                                </div>
-                                                {isSelected && <Check size={16} className="text-emerald-500" />}
+                                                <Divide size={16} /> Partes Iguales
                                             </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setSplitMode('custom')}
+                                                className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-2 transition-colors ${splitMode === 'custom' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                                            >
+                                                <Percent size={16} /> Por Importe
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Custom Split Inputs */}
+                                    {splitMode === 'custom' && (
+                                        <div className="space-y-3">
+                                            {householdMembers.map(m => (
+                                                <div key={m.id} className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-2 w-32">
+                                                        <Avatar url={m.photoURL} name={m.displayName} size="xs" />
+                                                        <span className="text-sm overflow-hidden text-ellipsis whitespace-nowrap">{m.displayName?.split(' ')[0]}</span>
+                                                    </div>
+                                                    <div className="relative flex-1">
+                                                        <span className="absolute left-3 top-2.5 text-slate-400 text-xs">€</span>
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            value={customAmounts[m.id] || ''}
+                                                            onChange={(e) => handleCustomAmountChange(m.id, e.target.value)}
+                                                            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 pl-6 text-sm outline-none focus:border-emerald-500"
+                                                            placeholder="0.00"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            ))}
+
+                                            {/* Validation Footer */}
+                                            <div className={`p-3 rounded-xl text-center text-sm font-bold flex justify-between items-center border ${isValidCustom ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-red-500/10 border-red-500/30 text-red-400'
+                                                }`}>
+                                                <span>Asignado: {customSum.toFixed(2)}€</span>
+                                                <span>Restante: {(Number(amount) - customSum).toFixed(2)}€</span>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Equal Split Grid (Only if Equal Mode) */}
+                                    {splitMode === 'equal' && (
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {householdMembers.map(m => {
+                                                const isSelected = splitAmong.includes(m.id);
+                                                return (
+                                                    <button
+                                                        type="button"
+                                                        key={m.id}
+                                                        onClick={() => toggleSplitMember(m.id)}
+                                                        className={`flex items-center justify-between p-3 rounded-xl border transition-all ${isSelected ? 'bg-slate-800 border-emerald-500/50 text-white' : 'bg-slate-900 border-slate-800 text-slate-500 opacity-70'
+                                                            }`}
+                                                    >
+                                                        <div className="flex items-center gap-2">
+                                                            <Avatar url={m.photoURL} name={m.displayName} size="xs" />
+                                                            <span className="text-sm">{m.displayName?.split(' ')[0]}</span>
+                                                        </div>
+                                                        {isSelected && <Check size={16} className="text-emerald-500" />}
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                    )}
+
+                                    <button
+                                        type="submit"
+                                        disabled={splitMode === 'custom' && !isValidCustom}
+                                        className={`w-full font-bold py-3 rounded-xl transition-all shadow-lg ${splitMode === 'custom' && !isValidCustom
+                                            ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                                            : 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-emerald-500/20'
+                                            }`}
+                                    >
+                                        {editingId ? 'Guardar Cambios' : 'Guardar Gasto'}
+                                    </button>
+
+                                    {editingId && (
+                                        <button
+                                            type="button"
+                                            onClick={handleDelete}
+                                            className="w-full text-red-500 text-xs font-bold py-3 hover:bg-red-500/10 rounded-xl transition-colors flex items-center justify-center gap-2"
+                                        >
+                                            <Trash size={14} /> Eliminar Gasto
+                                        </button>
+                                    )}
+                                </div>
+                            </form>
+                        </div>
+                    )}
+
+                    {/* === LIST VIEW === */}
+                    {activeTab === 'expenses' && (
+                        <div className="space-y-4 animate-in slide-in-from-right-4">
+                            {monthlyExpenses.length === 0 ? (
+                                <div className="text-center py-20 opacity-50 space-y-4">
+                                    <div className="bg-slate-800 w-20 h-20 rounded-full flex items-center justify-center mx-auto text-slate-600">
+                                        <Calendar size={40} />
+                                    </div>
+                                    <p>No hay gastos en {format(currentMonth, 'MMMM', { locale: es })}.</p>
+                                </div>
+                            ) : (
+                                monthlyExpenses.map(exp => {
+                                    const payer = householdMembers.find(m => m.id === exp.payerId);
+                                    const isSettlement = exp.category === 'settlement';
+
+                                    return (
+                                        <div
+                                            key={exp.id}
+                                            onClick={() => handleEdit(exp)}
+                                            className={`p-4 rounded-xl border flex justify-between items-center shadow-sm cursor-pointer active:scale-[0.98] transition-transform ${isSettlement
+                                                ? 'bg-emerald-500/10 border-emerald-500/30'
+                                                : 'bg-surface border-slate-700 hover:border-slate-500'
+                                                }`}
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <div className={`p-3 rounded-xl ${exp.category === 'groceries' ? 'bg-orange-500/10 text-orange-400' :
+                                                    exp.category === 'dining' ? 'bg-blue-500/10 text-blue-400' :
+                                                        exp.category === 'settlement' ? 'bg-emerald-500 text-white' :
+                                                            'bg-slate-700/50 text-slate-300'
+                                                    }`}>
+                                                    {exp.category === 'groceries' ? '🛒' :
+                                                        exp.category === 'dining' ? '🍽️' :
+                                                            exp.category === 'settlement' ? <ArrowRightLeft size={16} /> : '📦'}
+                                                </div>
+                                                <div>
+                                                    <h4 className={`font-bold text-base ${isSettlement ? 'text-emerald-400' : ''}`}>{exp.title}</h4>
+                                                    <div className="text-xs text-slate-400 flex flex-wrap gap-1 items-center mt-1">
+                                                        <span>{format(parseISO(exp.date), 'd MMM', { locale: es })}</span>
+                                                        <span>•</span>
+                                                        <span>Pagó {payer ? payer.displayName?.split(' ')[0] : '???'}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className={`${isSettlement ? 'text-emerald-400' : 'text-slate-200'} font-bold text-lg`}>
+                                                {exp.amount.toFixed(2)}€
+                                            </div>
+                                        </div>
+                                    )
+                                })
+                            )}
+                        </div>
+                    )}
+
+                    {/* === CHARTS VIEW === */}
+                    {activeTab === 'charts' && (
+                        <div className="space-y-4 animate-in slide-in-from-bottom-4">
+                            {chartData.length === 0 ? (
+                                <div className="text-center py-20 opacity-50 space-y-4">
+                                    <div className="bg-slate-800 w-20 h-20 rounded-full flex items-center justify-center mx-auto text-slate-600">
+                                        <PieChartIcon size={40} />
+                                    </div>
+                                    <p>No hay datos suficientes para gráficos.</p>
+                                </div>
+                            ) : (
+                                <div className="bg-surface p-6 rounded-2xl border border-slate-700 flex flex-col items-center">
+                                    <h3 className="font-bold text-lg text-slate-200 w-full mb-4">Gasto por Categorías</h3>
+                                    <div className="w-full h-64 mb-4">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <PieChart>
+                                                <Pie
+                                                    data={chartData}
+                                                    cx="50%"
+                                                    cy="50%"
+                                                    innerRadius={60}
+                                                    outerRadius={80}
+                                                    paddingAngle={5}
+                                                    dataKey="value"
+                                                >
+                                                    {chartData.map((entry, index) => (
+                                                        <Cell key={`cell-${index}`} fill={entry.color} stroke="rgba(0,0,0,0)" />
+                                                    ))}
+                                                </Pie>
+                                                <RechartsTooltip
+                                                    formatter={(value) => `${value.toFixed(2)}€`}
+                                                    contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '12px', color: '#fff' }}
+                                                    itemStyle={{ color: '#fff' }}
+                                                />
+                                            </PieChart>
+                                        </ResponsiveContainer>
+                                    </div>
+
+                                    <div className="w-full space-y-3">
+                                        {chartData.map((d, i) => (
+                                            <div key={i} className="flex justify-between items-center p-2 rounded-lg hover:bg-slate-800/50 transition-colors">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: d.color }}></div>
+                                                    <span className="text-sm font-medium text-slate-300">{d.name}</span>
+                                                </div>
+                                                <div className="flex flex-col items-end">
+                                                    <span className="font-bold text-white">{d.value.toFixed(2)}€</span>
+                                                    <span className="text-[10px] text-slate-500">{((d.value / totalMonthly) * 100).toFixed(0)}%</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                        <div className="border-t border-slate-700 mt-4 pt-2 flex justify-between items-center font-bold text-lg px-2">
+                                            <span>Total</span>
+                                            <span>{totalMonthly.toFixed(2)}€</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* === BALANCES VIEW === */}
+                    {activeTab === 'balances' && (
+                        <div className="space-y-6 animate-in slide-in-from-left-4">
+
+                            {/* Balances Bars */}
+                            <div className="bg-surface p-6 rounded-2xl border border-slate-700 space-y-4">
+                                <h3 className="font-bold text-lg flex items-center gap-2">
+                                    <TrendingUp className="text-emerald-500" /> Balance Mensual
+                                </h3>
+
+                                {isSettled && (
+                                    <div className="bg-green-500/20 text-green-400 p-3 rounded-xl text-sm font-bold flex items-center gap-2">
+                                        <Check size={16} /> Este mes está liquidado.
+                                    </div>
+                                )}
+
+                                <div className="space-y-4">
+                                    {balances.map(b => {
+                                        const isPositive = b.amount >= 0.01;
+                                        const isNegative = b.amount <= -0.01;
+                                        const isZero = !isPositive && !isNegative;
+                                        const barWidth = Math.min(Math.abs(b.amount) * 3, 150); // Visual scaling
+
+                                        return (
+                                            <div key={b.uid} className="flex items-center gap-3">
+                                                <Avatar url={b.member?.photoURL} name={b.member?.displayName} />
+                                                <div className="flex-1">
+                                                    <div className="flex justify-between items-end mb-1">
+                                                        <span className="font-medium text-sm">{b.member?.displayName?.split(' ')[0]}</span>
+                                                        <span className={`font-bold ${isPositive ? 'text-green-400' : isNegative ? 'text-red-400' : 'text-slate-500'}`}>
+                                                            {isPositive ? '+' : ''}{b.amount.toFixed(2)}€
+                                                        </span>
+                                                    </div>
+                                                    {!isZero && (
+                                                        <div className="h-2 bg-slate-800 rounded-full overflow-hidden flex">
+                                                            {isPositive ? (
+                                                                <div className="h-full bg-green-500 rounded-full" style={{ width: `${barWidth}px` }}></div>
+                                                            ) : (
+                                                                <div className="h-full bg-red-500 rounded-full ml-auto" style={{ width: `${barWidth}px` }}></div>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
                                         )
                                     })}
                                 </div>
                             </div>
 
-                            <button type="submit" className="w-full bg-emerald-500 text-white font-bold py-3 rounded-xl hover:bg-emerald-600 mt-4 shadow-lg shadow-emerald-500/20">
-                                Guardar Gasto
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            )}
-
-            {/* === LIST VIEW === */}
-            {activeTab === 'expenses' && (
-                <div className="space-y-6 animate-in slide-in-from-right-4">
-                    {Object.entries(groupedExpenses).map(([month, exps]) => (
-                        <div key={month} className="space-y-2">
-                            <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider sticky top-16 bg-background/95 backdrop-blur py-2 z-10">{month}</h3>
-                            {exps.map(exp => {
-                                const payer = householdMembers.find(m => m.id === exp.payerId);
-                                const isForEveryone = exp.splitAmong?.length === householdMembers.length;
-
-                                return (
-                                    <div key={exp.id} className="bg-surface p-4 rounded-xl border border-slate-700 flex justify-between items-center shadow-sm">
-                                        <div className="flex items-center gap-3">
-                                            <div className={`p-3 rounded-xl ${exp.category === 'groceries' ? 'bg-orange-500/10 text-orange-400' :
-                                                    exp.category === 'dining' ? 'bg-blue-500/10 text-blue-400' :
-                                                        'bg-slate-700/50 text-slate-300'
-                                                }`}>
-                                                {exp.category === 'groceries' ? '🛒' : exp.category === 'dining' ? '🍽️' : '📦'}
-                                            </div>
-                                            <div>
-                                                <h4 className="font-bold text-base">{exp.title}</h4>
-                                                <div className="text-xs text-slate-400 flex flex-wrap gap-1 items-center mt-1">
-                                                    <span className="bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded flex items-center gap-1">
-                                                        Pagado por {payer ? payer.displayName?.split(' ')[0] : '???'}
-                                                    </span>
-                                                    {!isForEveryone && (
-                                                        <span className="text-slate-500">
-                                                            • Para {exp.splitAmong.length} personas
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div className="text-emerald-400 font-bold text-lg">
-                                            {exp.amount.toFixed(2)}€
-                                        </div>
+                            {/* Transactions (How to settle) */}
+                            <div className="space-y-2">
+                                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider pl-2">Cómo liquidar deudas</h3>
+                                {transactions.length === 0 ? (
+                                    <div className="p-4 rounded-xl border border-dashed border-slate-700 text-center text-slate-500 text-sm">
+                                        Todo cuadrado 👌
                                     </div>
-                                )
-                            })}
-                        </div>
-                    ))}
-
-                    {expenses.length === 0 && (
-                        <div className="text-center py-20 opacity-50 space-y-4">
-                            <div className="bg-slate-800 w-20 h-20 rounded-full flex items-center justify-center mx-auto text-slate-600">
-                                <DollarSign size={40} />
+                                ) : (
+                                    transactions.map((t, idx) => (
+                                        <div key={idx} className="bg-surface p-4 rounded-xl border border-slate-700 flex flex-col gap-3 shadow-sm">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-1">
+                                                        <Avatar url={t.from?.photoURL} name={t.from?.displayName} size="xs" />
+                                                        <span className="font-bold text-slate-200 text-sm">{t.from?.displayName?.split(' ')[0]}</span>
+                                                    </div>
+                                                    <span className="text-xs text-slate-500">paga a</span>
+                                                    <div className="flex items-center gap-1">
+                                                        <Avatar url={t.to?.photoURL} name={t.to?.displayName} size="xs" />
+                                                        <span className="font-bold text-slate-200 text-sm">{t.to?.displayName?.split(' ')[0]}</span>
+                                                    </div>
+                                                </div>
+                                                <div className="text-xl font-bold text-white">{t.amount.toFixed(2)}€</div>
+                                            </div>
+                                            <button
+                                                onClick={() => handleSettleUp(t.from, t.to, t.amount)}
+                                                className="w-full py-2 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white rounded-lg text-xs font-bold transition-colors"
+                                            >
+                                                MARCAR COMO PAGADO
+                                            </button>
+                                        </div>
+                                    ))
+                                )}
                             </div>
-                            <p>No hay gastos aún.<br />¡Añade el primero!</p>
                         </div>
                     )}
-                </div>
-            )}
-
-            {/* === BALANCES VIEW === */}
-            {activeTab === 'balances' && (
-                <div className="space-y-6 animate-in slide-in-from-left-4">
-
-                    {/* Balances Bars */}
-                    <div className="bg-surface p-6 rounded-2xl border border-slate-700 space-y-4">
-                        <h3 className="font-bold text-lg flex items-center gap-2">
-                            <TrendingUp className="text-emerald-500" /> Balance
-                        </h3>
-
-                        <div className="space-y-4">
-                            {balances.map(b => {
-                                const isPositive = b.amount >= 0;
-                                const barWidth = Math.min(Math.abs(b.amount) * 2, 100); // Visual scaling
-
-                                return (
-                                    <div key={b.uid} className="flex items-center gap-3">
-                                        <Avatar url={b.member?.photoURL} name={b.member?.displayName} />
-                                        <div className="flex-1">
-                                            <div className="flex justify-between items-end mb-1">
-                                                <span className="font-medium text-sm">{b.member?.displayName?.split(' ')[0]}</span>
-                                                <span className={`font-bold ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
-                                                    {isPositive ? '+' : ''}{b.amount.toFixed(2)}€
-                                                </span>
-                                            </div>
-                                            {/* Bar */}
-                                            <div className="h-2 bg-slate-800 rounded-full overflow-hidden flex">
-                                                {isPositive ? (
-                                                    <div className="h-full bg-green-500 rounded-full" style={{ width: `${barWidth}px` }}></div>
-                                                ) : (
-                                                    <div className="h-full bg-red-500 rounded-full ml-auto" style={{ width: `${barWidth}px` }}></div>
-                                                )}
-                                            </div>
-                                            {isPositive ? (
-                                                <p className="text-[10px] text-green-500/70 mt-1">Le deben dinero</p>
-                                            ) : (
-                                                <p className="text-[10px] text-red-500/70 mt-1">Debe dinero</p>
-                                            )}
-                                        </div>
-                                    </div>
-                                )
-                            })}
-                        </div>
-                    </div>
-
-                    {/* Transactions (How to settle) */}
-                    <div className="space-y-2">
-                        <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider pl-2">Cómo liquidar deudas</h3>
-                        {transactions.length === 0 ? (
-                            <div className="bg-surface p-4 rounded-xl border border-slate-700 text-center text-green-400 font-bold">
-                                ¡Todo está cuadrado! 🎉
-                            </div>
-                        ) : (
-                            transactions.map((t, idx) => (
-                                <div key={idx} className="bg-surface p-4 rounded-xl border border-slate-700 flex items-center justify-between shadow-sm">
-                                    <div className="flex items-center gap-3">
-                                        <Avatar url={t.from?.photoURL} name={t.from?.displayName} />
-                                        <div className="text-slate-500">
-                                            <ArrowRightLeft size={16} className="text-slate-600" />
-                                        </div>
-                                        <Avatar url={t.to?.photoURL} name={t.to?.displayName} />
-                                    </div>
-                                    <div className="text-right">
-                                        <div className="text-xs text-slate-400">Paga a {t.to?.displayName?.split(' ')[0]}</div>
-                                        <div className="text-xl font-bold text-white">{t.amount.toFixed(2)}€</div>
-                                    </div>
-                                </div>
-                            ))
-                        )}
-                    </div>
-                </div>
+                </>
             )}
         </div>
     );

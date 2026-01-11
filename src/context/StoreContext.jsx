@@ -221,7 +221,7 @@ export const StoreProvider = ({ children }) => {
     };
 
     // Expenses Actions
-    const addExpense = async (title, amount, category, payerId, splitAmong) => {
+    const addExpense = async (title, amount, category, payerId, splitAmong, splitMode = 'equal', customAmounts = {}) => {
         if (!user || !household) return;
         await addDoc(collection(db, "expenses"), {
             title,
@@ -230,16 +230,99 @@ export const StoreProvider = ({ children }) => {
             date: new Date().toISOString(),
             householdId: household.id,
             payerId: payerId || user.uid, // Who paid?
-            splitAmong: splitAmong || householdMembers.map(m => m.id) // Who is is for? (Array of IDs)
+            splitAmong: splitAmong || householdMembers.map(m => m.id), // Who is is for? (Array of IDs)
+            splitMode,
+            customAmounts
         });
     };
+
+    const updateExpense = async (id, data) => {
+        if (!user || !household) return;
+        const payload = { ...data };
+        if (payload.amount) payload.amount = Number(payload.amount);
+        await updateDoc(doc(db, "expenses", id), payload);
+    }
+
+    const deleteExpense = async (id) => {
+        if (!user || !household) return;
+        await deleteDoc(doc(db, "expenses", id));
+    }
+
+    // Admin Actions
+    const adminAddUserToHousehold = async (userId, householdId) => {
+        if (!user || userRole !== 'admin') return;
+
+        // 1. Get current data to be safe
+        const houseRef = doc(db, "households", householdId);
+        const houseSnap = await getDoc(houseRef);
+        if (!houseSnap.exists()) throw new Error("Hogar no encontrado");
+
+        const currentMembers = houseSnap.data().members || [];
+        if (!currentMembers.includes(userId)) {
+            await updateDoc(houseRef, { members: [...currentMembers, userId] });
+        }
+
+        // 2. Update User
+        await updateDoc(doc(db, "users", userId), { householdId: householdId });
+    };
+
+    const adminCreateHousehold = async (name) => {
+        if (!user || userRole !== 'admin') return;
+        const code = generateCode();
+        await addDoc(collection(db, "households"), {
+            name,
+            code,
+            createdBy: user.uid,
+            members: [],
+            createdAt: new Date().toISOString()
+        });
+    }
+
+    const adminUpdateHousehold = async (id, data) => {
+        if (!user || userRole !== 'admin') return;
+        await updateDoc(doc(db, "households", id), data);
+    }
+
+    const adminSwitchHousehold = async (targetHouseholdId) => {
+        if (!user || userRole !== 'admin') return;
+
+        // 1. Ensure Admin is a member of the target household
+        const houseRef = doc(db, "households", targetHouseholdId);
+        const houseSnap = await getDoc(houseRef);
+        if (!houseSnap.exists()) throw new Error("Hogar no encontrado");
+
+        const currentMembers = houseSnap.data().members || [];
+        if (!currentMembers.includes(user.uid)) {
+            await updateDoc(houseRef, { members: [...currentMembers, user.uid] });
+        }
+
+        // 2. Switch Admin to that household
+        await updateDoc(doc(db, "users", user.uid), { householdId: targetHouseholdId });
+        // The listener in useEffect will handle the context switch
+    }
+
+    const adminCreateGhostUser = async (name) => {
+        if (!user || userRole !== 'admin') return;
+        const fakeUid = `ghost_${Date.now()}`;
+        await setDoc(doc(db, "users", fakeUid), {
+            uid: fakeUid,
+            displayName: name + " (Test)",
+            email: `ghost_${Date.now()}@test.local`,
+            photoURL: null,
+            role: 'user',
+            isGhost: true,
+            createdAt: new Date().toISOString()
+        });
+    }
 
     return (
         <StoreContext.Provider value={{
             user, userRole, household, householdMembers, login, logout,
             createHousehold, joinHousehold,
             meals, menu, expenses,
-            addMeal, updateMealStock, deleteMeal, setMenuItem, addExpense,
+            addMeal, updateMealStock, deleteMeal, setMenuItem, addExpense, updateExpense, deleteExpense,
+            // Admin exports
+            adminAddUserToHousehold, adminCreateHousehold, adminUpdateHousehold, adminSwitchHousehold, adminCreateGhostUser,
             isLoading
         }}>
             {children}
