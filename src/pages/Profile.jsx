@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../context/StoreContext';
 import { db, collection, query, where, getDocs, doc, updateDoc } from '../lib/firebase';
-import { User, Home, LogOut, Check, Plus, Loader2 } from 'lucide-react';
+import { User, Home, LogOut, Check, Plus, Loader2, UserMinus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export default function Profile() {
-    const { user, household, switchHousehold, logout, createHousehold, joinHousehold } = useStore();
+    const { user, household, switchHousehold, leaveHousehold, logout, createHousehold, joinHousehold } = useStore();
     const [myHouseholds, setMyHouseholds] = useState([]);
     const [loadingHomes, setLoadingHomes] = useState(true);
     const [isCreating, setIsCreating] = useState(false);
@@ -40,6 +40,17 @@ export default function Profile() {
         if (id === household?.id) return;
         await switchHousehold(id);
     };
+
+    const handleLeave = async (e, house) => {
+        e.stopPropagation();
+        if (confirm(`¿Seguro que quieres salir del hogar "${house.name}"?`)) {
+            await leaveHousehold(house.id);
+            // If they didn't leave the current one (which triggers reload), we need to refresh the list
+            if (house.id !== household?.id) {
+                setMyHouseholds(prev => prev.filter(h => h.id !== house.id));
+            }
+        }
+    }
 
     const handleLogout = async () => {
         if (confirm("¿Cerrar sesión?")) {
@@ -109,26 +120,37 @@ export default function Profile() {
                 ) : (
                     <div className="space-y-3">
                         {myHouseholds.map(home => (
-                            <button
+                            <div
                                 key={home.id}
-                                onClick={() => handleSwitch(home.id)}
                                 className={`w-full p-4 rounded-xl border flex items-center justify-between transition-all ${household?.id === home.id
-                                        ? 'bg-emerald-500/10 border-emerald-500 ring-1 ring-emerald-500'
-                                        : 'bg-surface border-slate-700 hover:border-slate-500'
+                                    ? 'bg-emerald-500/10 border-emerald-500 ring-1 ring-emerald-500'
+                                    : 'bg-surface border-slate-700 hover:border-slate-500'
                                     }`}
                             >
-                                <div className="text-left">
+                                <div
+                                    className="text-left flex-1 cursor-pointer"
+                                    onClick={() => handleSwitch(home.id)}
+                                >
                                     <h4 className={`font-bold ${household?.id === home.id ? 'text-emerald-400' : 'text-slate-200'}`}>
                                         {home.name}
                                     </h4>
                                     <p className="text-xs text-slate-500 font-mono">Código: {home.code}</p>
                                 </div>
-                                {household?.id === home.id && (
-                                    <div className="bg-emerald-500 text-white p-1 rounded-full">
-                                        <Check size={16} />
-                                    </div>
-                                )}
-                            </button>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={(e) => handleLeave(e, home)}
+                                        className="p-2 text-slate-500 hover:text-red-400 transition-colors"
+                                        title="Salir de este hogar"
+                                    >
+                                        <UserMinus size={18} />
+                                    </button>
+                                    {household?.id === home.id && (
+                                        <div className="bg-emerald-500 text-white p-1 rounded-full">
+                                            <Check size={16} />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
                         ))}
                     </div>
                 )}

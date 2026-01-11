@@ -253,6 +253,29 @@ export const StoreProvider = ({ children }) => {
         fetchHousehold(targetHouseholdId);
     };
 
+    const leaveHousehold = async (householdId) => {
+        if (!user) return;
+
+        // 1. Remove from Household members
+        const houseRef = doc(db, "households", householdId);
+        const houseSnap = await getDoc(houseRef);
+        if (houseSnap.exists()) {
+            const currentMembers = houseSnap.data().members || [];
+            const newMembers = currentMembers.filter(uid => uid !== user.uid);
+            await updateDoc(houseRef, { members: newMembers });
+        }
+
+        // 2. Clear user's active household if it's the one they are leaving
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists() && userSnap.data().householdId === householdId) {
+            await updateDoc(userRef, { householdId: null });
+            // If they have other households, we could pick one, but null is safer for now
+            // The app will redirect to setup/join
+            window.location.reload();
+        }
+    };
+
     const updateExpense = async (id, data) => {
         if (!user || !household) return;
         const payload = { ...data };
@@ -349,7 +372,7 @@ export const StoreProvider = ({ children }) => {
             meals, menu, expenses,
             addMeal, updateMealStock, deleteMeal, setMenuItem, addExpense, updateExpense, deleteExpense,
             // User Actions
-            switchHousehold,
+            switchHousehold, leaveHousehold,
             // Admin exports
             adminAddUserToHousehold, adminCreateHousehold, adminUpdateHousehold, adminSwitchHousehold, adminCreateGhostUser,
             adminDeleteUser, adminDeleteHousehold,
