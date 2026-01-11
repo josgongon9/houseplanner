@@ -59,7 +59,7 @@ describe('Expenses Component', () => {
         render(<Expenses />);
 
         // Switch to Balances tab
-        const balancesTab = screen.getByText('Saldos');
+        const balancesTab = screen.getByText(/Saldos/i);
         fireEvent.click(balancesTab);
 
         // Jose paid 10, split by 2 = 5 each.
@@ -82,18 +82,15 @@ describe('Expenses Component', () => {
         });
 
         render(<Expenses />);
-        fireEvent.click(screen.getByText('Saldos'));
+        fireEvent.click(screen.getByText(/Saldos/i));
 
         // Maria (user2) pays Jose (user1) 5€
-        // Regex or text match
-        // Note: The UI might say "Paga a Jose" or similar.
-        // Ensure the text matches what is in Expenses.jsx: "paga a" (lowercase) followed by name
-        // My previous test code looked for "Paga a Jose". 
-        // In Expenses.jsx step 222: `<span className="text-sm text-slate-300">paga a</span>`
-        // So it's "paga a". Case sensitive? getByText is usually sensitive or flexible depending on opts.
-        // Let's use regex /paga a/i to be safe.
         expect(screen.getByText(/paga a/i)).toBeInTheDocument();
-        expect(screen.getByText('Jose')).toBeInTheDocument();
+
+        // "Jose" appears in Balances list AND inside the transaction card now. 
+        // So we expect multiple or at least one.
+        const joseInstances = screen.getAllByText('Jose');
+        expect(joseInstances.length).toBeGreaterThan(0);
 
         const amounts = screen.getAllByText('5.00€');
         expect(amounts.length).toBeGreaterThanOrEqual(1);
