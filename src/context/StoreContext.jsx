@@ -133,14 +133,7 @@ export const StoreProvider = ({ children }) => {
     // ACTIONS ------------------
 
     const login = async () => {
-        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-        try {
-            if (isMobile) {
-                await signInWithRedirect(auth, googleProvider);
-            } else {
-                await signInWithPopup(auth, googleProvider);
-            }
-        }
+        try { await signInWithPopup(auth, googleProvider); }
         catch (error) { console.error(error); alert(error.message); }
     };
 
