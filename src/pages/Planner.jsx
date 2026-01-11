@@ -4,12 +4,12 @@ import { useStore } from '../context/StoreContext';
 // Note: importing from date-fns directly doesn't work well in some ESM envs without specific paths if not configured, 
 // but standard vite setup handles 'date-fns'. 
 // I'll assume standard import works.
-import { format, startOfWeek, addDays, addWeeks, subWeeks, isSameDay, startOfDay } from 'date-fns';
+import { format, startOfWeek, addDays, addWeeks, subWeeks, isSameDay, startOfDay, isPast, isToday, endOfMonth } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, AlertTriangle, PlusCircle, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, AlertTriangle, PlusCircle, X, Home, Calendar } from 'lucide-react';
 
 export default function Planner() {
-    const { meals, menu, setMenuItem, logout, household } = useStore();
+    const { meals, menu, setMenuItem, household } = useStore();
     const [currentDate, setCurrentDate] = useState(new Date());
 
     // Modal State
@@ -56,82 +56,135 @@ export default function Planner() {
         const dateStr = format(day, 'yyyy-MM-dd');
         const mealId = menu[`${dateStr}-${type}`];
         const meal = meals.find(m => m.id === mealId);
+        const dayIsPast = isPast(day) && !isToday(day);
 
         // Check stock
         const isOverLimit = meal && (usedCounts[meal.id] > meal.quantity);
 
         return (
             <div
-                onClick={() => handleSlotClick(dateStr, type)}
+                onClick={() => !dayIsPast && handleSlotClick(dateStr, type)}
                 className={`
-            relative p-3 rounded-xl border border-dashed border-slate-700 min-h-[80px] flex flex-col justify-center items-center text-center cursor-pointer transition-colors
-            ${meal ? 'bg-surface border-solid border-slate-600' : 'hover:bg-slate-800/50'}
-        `}
+                    relative p-3 rounded-xl border min-h-[80px] flex flex-col justify-center items-center text-center cursor-pointer transition-all
+                    ${meal ? 'bg-surface border-slate-600 shadow-sm' : 'border-dashed border-slate-700 hover:bg-slate-800/50'}
+                    ${dayIsPast ? 'opacity-40 grayscale-[0.5] cursor-default bg-slate-900/20' : ''}
+                    ${isToday(day) ? 'ring-1 ring-emerald-500/30' : ''}
+                `}
             >
-                {!meal && <PlusCircle className="text-slate-600 mb-1" size={20} />}
-                {!meal && <span className="text-xs text-slate-500">Añadir</span>}
+                {!meal && !dayIsPast && <PlusCircle className="text-slate-600 mb-1" size={18} />}
+                {!meal && !dayIsPast && <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Planificar</span>}
+                {!meal && dayIsPast && <span className="text-[10px] text-slate-600 italic">No registrado</span>}
 
                 {meal && (
                     <>
-                        <span className="font-medium text-sm line-clamp-2">{meal.name}</span>
-                        {isOverLimit && (
+                        <span className={`font-medium text-sm line-clamp-2 ${dayIsPast ? 'text-slate-500' : 'text-slate-100'}`}>{meal.name}</span>
+                        {isOverLimit && !dayIsPast && (
                             <div className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full shadow-lg animate-pulse" title={`Usado ${usedCounts[meal.id]} veces, stock: ${meal.quantity}`}>
                                 <AlertTriangle size={12} />
                             </div>
                         )}
-                        {/* Remove button (small x) */}
-                        {/* We can handle remove by opening modal and selecting 'None' or clicking X here... logic inside modal is cleaner for mobile */}
                     </>
                 )}
             </div>
         );
     };
 
+    // Date Range Formatter
+    const dateRangeLabel = useMemo(() => {
+        const start = startOfCurrentWeek;
+        const end = addDays(startOfCurrentWeek, 6);
+
+        if (format(start, 'MMM') === format(end, 'MMM')) {
+            return `Del ${format(start, 'd')} al ${format(end, 'd')} de ${format(start, 'MMMM', { locale: es })}`;
+        } else {
+            return `Del ${format(start, 'd')} de ${format(start, 'MMM', { locale: es })} al ${format(end, 'd')} de ${format(end, 'MMM', { locale: es })}`;
+        }
+    }, [startOfCurrentWeek]);
+
     return (
         <div className="pb-24">
             {/* Header */}
-            <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-md p-4 border-b border-white/5">
-                <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                        <button onClick={() => setCurrentDate(subWeeks(currentDate, 1))} className="p-2 hover:bg-white/5 rounded-full"><ChevronLeft /></button>
-                        <h2 className="text-lg font-bold capitalize">
-                            {format(startOfCurrentWeek, 'MMMM', { locale: es })}
-                        </h2>
-                        <button onClick={() => setCurrentDate(addWeeks(currentDate, 1))} className="p-2 hover:bg-white/5 rounded-full"><ChevronRight /></button>
+            <div className="sticky top-0 z-10 bg-background/90 backdrop-blur-md border-b border-slate-800 shadow-xl">
+                <div className="px-4 py-2 flex items-center justify-between">
+                    <div className="flex items-center gap-1">
+                        {household && (
+                            <div className="bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-lg border border-emerald-500/20 flex items-center gap-1.5 animate-in fade-in">
+                                <Home size={12} />
+                                <span className="text-[10px] font-bold tracking-tight uppercase truncate max-w-[150px]">
+                                    {household.name}
+                                </span>
+                            </div>
+                        )}
                     </div>
-                    <button onClick={logout} className="text-xs text-slate-400 hover:text-white border border-slate-700 px-3 py-1 rounded-full transition-colors">Salir</button>
                 </div>
-                {household && (
-                    <div className="flex justify-center items-center gap-2 mb-2">
-                        <span className="text-[10px] bg-primary/20 text-primary px-2 py-0.5 rounded-full border border-primary/30 flex items-center gap-1">
-                            {household.name} • {household.code}
-                        </span>
+
+                <div className="px-4 pb-3 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={() => setCurrentDate(subWeeks(currentDate, 1))}
+                            className="p-1.5 hover:bg-slate-800 rounded-lg border border-slate-800 transition-colors"
+                        >
+                            <ChevronLeft size={18} />
+                        </button>
+                        <div className="flex flex-col">
+                            <h2 className="text-sm font-bold capitalize text-white leading-tight">
+                                {format(startOfCurrentWeek, 'MMMM yyyy', { locale: es })}
+                            </h2>
+                            <span className="text-[10px] text-slate-400 font-medium">
+                                {dateRangeLabel}
+                            </span>
+                        </div>
+                        <button
+                            onClick={() => setCurrentDate(addWeeks(currentDate, 1))}
+                            className="p-1.5 hover:bg-slate-800 rounded-lg border border-slate-800 transition-colors"
+                        >
+                            <ChevronRight size={18} />
+                        </button>
                     </div>
-                )}
-                <div className="text-xs text-center text-slate-400">
-                    Del {format(startOfCurrentWeek, 'd')} al {format(addDays(startOfCurrentWeek, 6), 'd MMM')}
+
+                    {!isSameDay(startOfWeek(new Date(), { weekStartsOn: 1 }), startOfCurrentWeek) && (
+                        <button
+                            onClick={() => setCurrentDate(new Date())}
+                            className="p-1.5 bg-emerald-500/10 text-emerald-400 rounded-lg border border-emerald-500/20 flex items-center gap-1"
+                        >
+                            <Calendar size={14} />
+                            <span className="text-[10px] font-bold">Hoy</span>
+                        </button>
+                    )}
                 </div>
             </div>
 
             {/* Grid */}
             <div className="p-4 space-y-6">
-                {days.map(day => (
-                    <div key={day.toString()} className="animate-in fade-in duration-500">
-                        <h3 className="font-bold text-lg mb-2 capitalize text-slate-300">
-                            {format(day, 'EEEE d', { locale: es })}
-                        </h3>
-                        <div className="grid grid-cols-2 gap-3">
-                            <div className="space-y-1">
-                                <span className="text-xs text-slate-500 font-medium ml-1">ALMUERZO</span>
-                                {renderSlot(day, 'lunch')}
+                {days.map(day => {
+                    const dayIsPast = isPast(day) && !isToday(day);
+                    const dayIsToday = isToday(day);
+
+                    return (
+                        <div key={day.toString()} className={`animate-in fade-in duration-500 ${dayIsPast ? 'opacity-90' : ''}`}>
+                            <div className="flex items-center gap-2 mb-2">
+                                <h3 className={`font-bold text-lg capitalize transition-colors ${dayIsToday ? 'text-emerald-400' : dayIsPast ? 'text-slate-500' : 'text-slate-200'}`}>
+                                    {format(day, 'EEEE d', { locale: es })}
+                                </h3>
+                                {dayIsToday && (
+                                    <span className="bg-emerald-500 text-black text-[9px] font-black px-1.5 py-0.5 rounded uppercase flex items-center gap-0.5">
+                                        <div className="w-1 h-1 bg-black rounded-full animate-pulse " /> Hoy
+                                    </span>
+                                )}
                             </div>
-                            <div className="space-y-1">
-                                <span className="text-xs text-slate-500 font-medium ml-1">CENA</span>
-                                {renderSlot(day, 'dinner')}
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                    <span className="text-xs text-slate-500 font-medium ml-1">ALMUERZO</span>
+                                    {renderSlot(day, 'lunch')}
+                                </div>
+                                <div className="space-y-1">
+                                    <span className="text-xs text-slate-500 font-medium ml-1">CENA</span>
+                                    {renderSlot(day, 'dinner')}
+                                </div>
                             </div>
                         </div>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
 
             {/* Modal / Bottom Sheet */}

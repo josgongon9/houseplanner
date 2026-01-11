@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../context/StoreContext';
 import { db, collection, updateDoc, doc, onSnapshot } from '../lib/firebase';
-import { Shield, ShieldAlert, User, ChevronLeft, Home, Edit, Plus, X, LogIn } from 'lucide-react';
+import { Shield, ShieldAlert, User, ChevronLeft, Home, Edit, Plus, X, LogIn, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function Admin() {
-    const { user, userRole, adminUpdateHousehold, adminAddUserToHousehold, adminCreateHousehold, adminSwitchHousehold, adminCreateGhostUser, household: currentHousehold } = useStore();
+    const { user, userRole, adminUpdateHousehold, adminAddUserToHousehold, adminCreateHousehold, adminSwitchHousehold, adminCreateGhostUser, adminDeleteUser, adminDeleteHousehold, household: currentHousehold } = useStore();
     const [users, setUsers] = useState([]);
     const [households, setHouseholds] = useState([]);
     const [activeTab, setActiveTab] = useState('users'); // users, households
@@ -133,12 +133,24 @@ export default function Admin() {
                                 <button
                                     onClick={() => toggleRole(u.id, u.role)}
                                     className={`px-3 py-1 rounded-full text-xs font-bold border transition-colors ${u.role === 'admin'
-                                            ? 'bg-primary/20 text-primary border-primary/50 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/50'
-                                            : 'bg-slate-800 text-slate-400 border-slate-600 hover:bg-primary/20 hover:text-primary hover:border-primary/50'
+                                        ? 'bg-primary/20 text-primary border-primary/50 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/50'
+                                        : 'bg-slate-800 text-slate-400 border-slate-600 hover:bg-primary/20 hover:text-primary hover:border-primary/50'
                                         }`}
                                 >
                                     {u.role === 'admin' ? 'ADMIN' : 'USUARIO'}
                                 </button>
+                                {u.id !== user.uid && (
+                                    <button
+                                        onClick={async () => {
+                                            if (confirm(`¿Eliminar permanentemente a "${u.displayName || u.email}"?`)) {
+                                                await adminDeleteUser(u.id);
+                                            }
+                                        }}
+                                        className="p-2 text-slate-500 hover:text-red-500 transition-colors"
+                                    >
+                                        <Trash2 size={16} />
+                                    </button>
+                                )}
                             </div>
                         ))}
                     </div>
@@ -200,7 +212,17 @@ export default function Admin() {
                                                                     <LogIn size={14} /> <span className="text-[10px] font-bold">ENTRAR</span>
                                                                 </button>
                                                             )}
-                                                            <button onClick={() => setEditingHousehold(h.id)} className="p-1.5 bg-slate-700 hover:bg-white text-slate-400 hover:text-black rounded"><Edit size={14} /></button>
+                                                            <button onClick={() => setEditingHousehold(h.id)} className="p-1.5 bg-slate-700 hover:bg-white text-slate-400 hover:text-black rounded transition-colors"><Edit size={14} /></button>
+                                                            <button
+                                                                onClick={async () => {
+                                                                    if (confirm(`¿Eliminar EL HOGAR "${h.name}" y todos sus datos? (No se puede deshacer)`)) {
+                                                                        await adminDeleteHousehold(h.id);
+                                                                    }
+                                                                }}
+                                                                className="p-1.5 bg-slate-700 hover:bg-red-600 text-slate-400 hover:text-white rounded transition-colors"
+                                                            >
+                                                                <Trash2 size={14} />
+                                                            </button>
                                                         </div>
                                                     </div>
                                                     <div className="text-xs text-slate-400 font-mono bg-black/30 px-2 py-0.5 rounded inline-block mt-1 border border-slate-700">
@@ -236,34 +258,36 @@ export default function Admin() {
             </div>
 
             {/* ADD USER MODAL */}
-            {showAddUserModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-                    <div className="bg-surface w-full max-w-sm rounded-xl p-4 shadow-2xl border border-slate-700">
-                        <h3 className="font-bold text-lg mb-4">Añadir usuario a hogar</h3>
-                        <div className="max-h-60 overflow-y-auto space-y-2 mb-4">
-                            {users.filter(u => !u.householdId || u.householdId !== showAddUserModal).map(u => (
-                                <button
-                                    key={u.id}
-                                    onClick={() => setSelectedUserToAdd(u.id)}
-                                    className={`w-full text-left p-2 rounded flex items-center gap-3 hover:bg-slate-800 border ${selectedUserToAdd === u.id ? 'border-primary bg-primary/10' : 'border-transparent'}`}
-                                >
-                                    <Avatar url={u.photoURL} size="xs" />
-                                    <div className="overflow-hidden">
-                                        <div className="font-bold text-sm truncate">{u.displayName}</div>
-                                        <div className="text-[10px] text-slate-400 truncate">{u.email}</div>
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-                        <div className="flex gap-2">
-                            <button onClick={handleAddUserToHousehold} disabled={!selectedUserToAdd} className="flex-1 bg-primary text-black font-bold py-2 rounded disabled:opacity-50">Añadir</button>
-                            <button onClick={() => { setShowAddUserModal(false); setSelectedUserToAdd(""); }} className="flex-1 bg-slate-800 py-2 rounded">Cancelar</button>
+            {
+                showAddUserModal && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                        <div className="bg-surface w-full max-w-sm rounded-xl p-4 shadow-2xl border border-slate-700">
+                            <h3 className="font-bold text-lg mb-4">Añadir usuario a hogar</h3>
+                            <div className="max-h-60 overflow-y-auto space-y-2 mb-4">
+                                {users.filter(u => !u.householdId || u.householdId !== showAddUserModal).map(u => (
+                                    <button
+                                        key={u.id}
+                                        onClick={() => setSelectedUserToAdd(u.id)}
+                                        className={`w-full text-left p-2 rounded flex items-center gap-3 hover:bg-slate-800 border ${selectedUserToAdd === u.id ? 'border-primary bg-primary/10' : 'border-transparent'}`}
+                                    >
+                                        <Avatar url={u.photoURL} size="xs" />
+                                        <div className="overflow-hidden">
+                                            <div className="font-bold text-sm truncate">{u.displayName}</div>
+                                            <div className="text-[10px] text-slate-400 truncate">{u.email}</div>
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={handleAddUserToHousehold} disabled={!selectedUserToAdd} className="flex-1 bg-primary text-black font-bold py-2 rounded disabled:opacity-50">Añadir</button>
+                                <button onClick={() => { setShowAddUserModal(false); setSelectedUserToAdd(""); }} className="flex-1 bg-slate-800 py-2 rounded">Cancelar</button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
-        </div>
+        </div >
     );
 }
 

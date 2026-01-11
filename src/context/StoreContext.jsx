@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef } from "react";
 import {
     db, auth, googleProvider, signInWithPopup, signInWithRedirect, signOut, onAuthStateChanged,
     collection, addDoc, updateDoc, setDoc, deleteDoc, doc, onSnapshot, getDoc, getDocs,
@@ -21,6 +21,9 @@ export const StoreProvider = ({ children }) => {
     const [expenses, setExpenses] = useState([]); // New Module
 
     const [isLoading, setIsLoading] = useState(true);
+
+    // Listener Ref to avoid leaks when switching households
+    const householdListenerRef = useRef(null);
 
     // 1. Authentication & Profile Sync
     useEffect(() => {
@@ -76,8 +79,14 @@ export const StoreProvider = ({ children }) => {
 
     // Helper: Fetch Household Details
     const fetchHousehold = (householdId) => {
+        // Cleanup previous listener if exists
+        if (householdListenerRef.current) {
+            householdListenerRef.current();
+            householdListenerRef.current = null;
+        }
+
         // We set up a listener for the household itself (in case name changes etc)
-        return onSnapshot(doc(db, "households", householdId), (doc) => {
+        householdListenerRef.current = onSnapshot(doc(db, "households", householdId), (doc) => {
             if (doc.exists()) {
                 setHousehold({ id: doc.id, ...doc.data() });
             } else {
@@ -236,6 +245,14 @@ export const StoreProvider = ({ children }) => {
         });
     };
 
+    const switchHousehold = async (targetHouseholdId) => {
+        if (!user) return;
+        // Verify (optimistic) and update
+        await updateDoc(doc(db, "users", user.uid), { householdId: targetHouseholdId });
+        // Manually switch context
+        fetchHousehold(targetHouseholdId);
+    };
+
     const updateExpense = async (id, data) => {
         if (!user || !household) return;
         const payload = { ...data };
@@ -315,14 +332,27 @@ export const StoreProvider = ({ children }) => {
         });
     }
 
+    const adminDeleteUser = async (userId) => {
+        if (!user || userRole !== 'admin') return;
+        await deleteDoc(doc(db, "users", userId));
+    };
+
+    const adminDeleteHousehold = async (householdId) => {
+        if (!user || userRole !== 'admin') return;
+        await deleteDoc(doc(db, "households", householdId));
+    };
+
     return (
         <StoreContext.Provider value={{
             user, userRole, household, householdMembers, login, logout,
             createHousehold, joinHousehold,
             meals, menu, expenses,
             addMeal, updateMealStock, deleteMeal, setMenuItem, addExpense, updateExpense, deleteExpense,
+            // User Actions
+            switchHousehold,
             // Admin exports
             adminAddUserToHousehold, adminCreateHousehold, adminUpdateHousehold, adminSwitchHousehold, adminCreateGhostUser,
+            adminDeleteUser, adminDeleteHousehold,
             isLoading
         }}>
             {children}

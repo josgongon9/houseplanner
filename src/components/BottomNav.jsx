@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { CalendarDays, UtensilsCrossed, Shield, Wallet } from 'lucide-react';
+import { CalendarDays, UtensilsCrossed, Shield, Wallet, User } from 'lucide-react';
 import clsx from 'clsx';
 import { useStore } from '../context/StoreContext';
 
@@ -22,6 +22,10 @@ export default function BottomNav() {
                 <Link to="/expenses" className={clsx("flex flex-col items-center gap-1 p-2 w-full", currentPath === "/expenses" ? "text-emerald-400" : "text-slate-400")}>
                     <Wallet size={20} />
                     <span className="text-[10px] font-medium">Gastos</span>
+                </Link>
+                <Link to="/profile" className={clsx("flex flex-col items-center gap-1 p-2 w-full", currentPath === "/profile" ? "text-primary" : "text-slate-400")}>
+                    <User size={20} />
+                    <span className="text-[10px] font-medium">Perfil</span>
                 </Link>
                 {userRole === 'admin' && (
                     <Link to="/admin" className={clsx("flex flex-col items-center gap-1 p-2 w-full", currentPath === "/admin" ? "text-primary" : "text-amber-500/50")}>

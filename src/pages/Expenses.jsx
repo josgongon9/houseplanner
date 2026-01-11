@@ -379,7 +379,7 @@ export default function Expenses() {
 
                     {/* --- ADD/EDIT EXPENSE MODAL --- */}
                     {showAdd && (
-                        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-0 sm:p-4">
+                        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-0 sm:p-4">
                             <form onSubmit={handleSubmit} className="bg-surface w-full max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col shadow-2xl animate-in slide-in-from-bottom-10 max-h-[90vh] overflow-y-auto">
                                 <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900/50 rounded-t-2xl">
                                     <h3 className="font-bold text-lg text-emerald-400">
@@ -388,7 +388,7 @@ export default function Expenses() {
                                     <button type="button" onClick={() => setShowAdd(false)} className="p-2 bg-slate-800 rounded-full"><X size={20} /></button>
                                 </div>
 
-                                <div className="p-4 space-y-4">
+                                <div className="p-4 space-y-4 pb-12">
                                     {/* Amount & Title */}
                                     <div className="flex gap-4">
                                         <div className="flex-1">
