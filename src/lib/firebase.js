@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, updateDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc, getDocs, where, serverTimestamp } from "firebase/firestore";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut, onAuthStateChanged } from "firebase/auth";
 
 // TODO: Replace with your Firebase project configuration
 // Go to https://console.firebase.google.com/
@@ -27,4 +27,4 @@ try {
 
 const googleProvider = new GoogleAuthProvider();
 
-export { db, auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged, collection, addDoc, updateDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc, getDocs, where, serverTimestamp };
+export { db, auth, googleProvider, signInWithPopup, signInWithRedirect, signOut, onAuthStateChanged, collection, addDoc, updateDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc, getDocs, where, serverTimestamp };

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import {
-    db, auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged,
+    db, auth, googleProvider, signInWithPopup, signInWithRedirect, signOut, onAuthStateChanged,
     collection, addDoc, updateDoc, setDoc, deleteDoc, doc, onSnapshot, getDoc, getDocs,
     query, orderBy, where, serverTimestamp
 } from "../lib/firebase";
@@ -133,7 +133,14 @@ export const StoreProvider = ({ children }) => {
     // ACTIONS ------------------
 
     const login = async () => {
-        try { await signInWithPopup(auth, googleProvider); }
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        try {
+            if (isMobile) {
+                await signInWithRedirect(auth, googleProvider);
+            } else {
+                await signInWithPopup(auth, googleProvider);
+            }
+        }
         catch (error) { console.error(error); alert(error.message); }
     };
 
