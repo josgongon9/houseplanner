@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef } from "r
 import {
     db, auth, googleProvider, signInWithPopup, signInWithRedirect, signOut, onAuthStateChanged,
     collection, addDoc, updateDoc, setDoc, deleteDoc, doc, onSnapshot, getDoc, getDocs,
-    query, orderBy, where, serverTimestamp
+    query, orderBy, where, serverTimestamp, runTransaction
 } from "../lib/firebase";
 
 const StoreContext = createContext();
@@ -112,7 +112,8 @@ export const StoreProvider = ({ children }) => {
             snapshot.docs.forEach(d => {
                 const compositeKey = d.id;
                 const localKey = compositeKey.replace(`${household.id}_`, '');
-                menuData[localKey] = d.data().mealId;
+                // Store the entire data object to support both formats
+                menuData[localKey] = d.data();
             });
             setMenu(menuData);
         });
@@ -123,6 +124,7 @@ export const StoreProvider = ({ children }) => {
             setExpenses(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
         });
 
+
         // D. Household Members (Fetch profiles)
         const qMembers = query(collection(db, "users"), where("householdId", "==", household.id));
         const unsubMembers = onSnapshot(qMembers, (snapshot) => {
@@ -131,6 +133,9 @@ export const StoreProvider = ({ children }) => {
 
         setIsLoading(false);
 
+        // E. Process past days to update stock
+        processPassedDays();
+
         return () => {
             unsubMeals();
             unsubMenu();
@@ -138,6 +143,105 @@ export const StoreProvider = ({ children }) => {
             unsubMembers();
         };
     }, [household]); // Re-run if household changes
+
+    // Process passed days to automatically reduce stock
+    const processPassedDays = async () => {
+        if (!user || !household) return;
+
+        try {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            // Get all menu entries for this household
+            const menuQuery = query(
+                collection(db, "menu"),
+                where("householdId", "==", household.id)
+            );
+            const menuSnapshot = await getDocs(menuQuery);
+
+            // Get all meals to build a map
+            const mealsQuery = query(
+                collection(db, "meals"),
+                where("householdId", "==", household.id)
+            );
+            const mealsSnapshot = await getDocs(mealsQuery);
+            const mealsMap = {};
+            mealsSnapshot.docs.forEach(doc => {
+                mealsMap[doc.id] = { id: doc.id, ...doc.data() };
+            });
+
+            let processedCount = 0;
+
+            // Process each menu entry using transactions (prevents race conditions)
+            for (const menuDoc of menuSnapshot.docs) {
+                const menuData = menuDoc.data();
+                const menuDate = new Date(menuData.date);
+                menuDate.setHours(0, 0, 0, 0);
+
+                // Only process if date is in the past
+                if (menuDate < today) {
+                    try {
+                        // Use a transaction to atomically check and mark as processed
+                        await runTransaction(db, async (transaction) => {
+                            const menuRef = doc(db, "menu", menuDoc.id);
+                            const freshMenuDoc = await transaction.get(menuRef);
+
+                            if (!freshMenuDoc.exists()) return;
+
+                            const freshMenuData = freshMenuDoc.data();
+
+                            // Check if already processed (inside transaction)
+                            if (freshMenuData.processed) {
+                                return; // Already processed, skip
+                            }
+
+                            // Mark as processed
+                            transaction.update(menuRef, { processed: true });
+
+                            // Calculate stock reductions
+                            let mealsToProcess = [];
+                            if (freshMenuData.meals && Array.isArray(freshMenuData.meals)) {
+                                mealsToProcess = freshMenuData.meals;
+                            } else if (freshMenuData.mealId) {
+                                mealsToProcess = [{ mealId: freshMenuData.mealId, portion: 1 }];
+                            }
+
+                            // For each meal, reduce stock (within same transaction)
+                            for (const { mealId, portion } of mealsToProcess) {
+                                const meal = mealsMap[mealId];
+                                if (meal) {
+                                    const mealRef = doc(db, "meals", mealId);
+                                    const mealDoc = await transaction.get(mealRef);
+
+                                    if (mealDoc.exists()) {
+                                        const currentQuantity = mealDoc.data().quantity || 0;
+                                        const newQuantity = Math.max(0, Number(currentQuantity) - Number(portion));
+                                        transaction.update(mealRef, { quantity: newQuantity });
+                                    }
+                                }
+                            }
+
+                            processedCount++;
+                        });
+                    } catch (error) {
+                        if (error.code === 'aborted') {
+                            // Transaction was aborted (likely due to concurrent modification)
+                            // This is normal and expected in race conditions
+                            console.log('Transaction aborted for', menuDoc.id, '- Already processed by another user');
+                        } else {
+                            console.error('Error processing menu entry', menuDoc.id, error);
+                        }
+                    }
+                }
+            }
+
+            if (processedCount > 0) {
+                console.log(`✅ Procesados ${processedCount} días pasados y stock actualizado`);
+            }
+        } catch (error) {
+            console.error("Error processing passed days:", error);
+        }
+    };
 
     // ACTIONS ------------------
 
@@ -206,22 +310,27 @@ export const StoreProvider = ({ children }) => {
         await updateDoc(doc(db, "meals", id), { quantity: Number(quantity) });
     };
 
+    const updateMeal = async (id, data) => {
+        if (!user) return;
+        await updateDoc(doc(db, "meals", id), data);
+    };
+
     const deleteMeal = async (id) => {
         if (!user) return;
         await deleteDoc(doc(db, "meals", id));
     };
 
-    const setMenuItem = async (date, type, mealId) => {
+    const setMenuItem = async (date, type, meals) => {
         if (!user || !household) return;
         const localKey = `${date}-${type}`;
         const compositeId = `${household.id}_${localKey}`;
         const menuRef = doc(db, "menu", compositeId);
 
-        if (!mealId) {
+        if (!meals || meals.length === 0) {
             await deleteDoc(menuRef);
         } else {
             await setDoc(menuRef, {
-                mealId,
+                meals, // Array of {mealId, portion}
                 householdId: household.id,
                 date, // useful for filtering
                 type
@@ -370,7 +479,7 @@ export const StoreProvider = ({ children }) => {
             user, userRole, household, householdMembers, login, logout,
             createHousehold, joinHousehold,
             meals, menu, expenses,
-            addMeal, updateMealStock, deleteMeal, setMenuItem, addExpense, updateExpense, deleteExpense,
+            addMeal, updateMealStock, updateMeal, deleteMeal, setMenuItem, addExpense, updateExpense, deleteExpense,
             // User Actions
             switchHousehold, leaveHousehold,
             // Admin exports
