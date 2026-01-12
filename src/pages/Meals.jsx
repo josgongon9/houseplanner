@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../context/StoreContext';
-import { Plus, Trash2, Search, ChefHat, X, Save, FileText, List } from 'lucide-react';
+import { Plus, Trash2, Search, ChefHat, X, Save, FileText, List, Calendar } from 'lucide-react';
 
 export default function Meals() {
-    const { meals, addMeal, updateMealStock, updateMeal, deleteMeal } = useStore();
+    const { meals, menu, addMeal, updateMealStock, updateMeal, deleteMeal } = useStore();
     const [showAdd, setShowAdd] = useState(false);
     const [search, setSearch] = useState("");
 
@@ -23,6 +23,26 @@ export default function Meals() {
             setIngredients(editingMeal.ingredients || "");
         }
     }, [editingMeal]);
+
+    // Calculate usage counts from menu
+    const plannedCounts = useMemo(() => {
+        const counts = {};
+        Object.values(menu).forEach(menuEntry => {
+            if (!menuEntry || menuEntry.processed) return; // Only count unprocessed meals
+
+            let mealsToProcess = [];
+            if (menuEntry.meals && Array.isArray(menuEntry.meals)) {
+                mealsToProcess = menuEntry.meals;
+            } else if (menuEntry.mealId) {
+                mealsToProcess = [{ mealId: menuEntry.mealId, portion: 1 }];
+            }
+
+            mealsToProcess.forEach(({ mealId, portion }) => {
+                counts[mealId] = (counts[mealId] || 0) + Number(portion);
+            });
+        });
+        return counts;
+    }, [menu]);
 
     const handleSubmit = (e) => {
         e.preventDefault();
@@ -118,6 +138,13 @@ export default function Meals() {
                             <div className="flex items-center gap-2">
                                 <h3 className="font-semibold text-lg">{meal.name}</h3>
                                 {(meal.notes || meal.ingredients) && <ChefHat size={14} className="text-emerald-400" />}
+                                <span className={`flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-lg border ${(plannedCounts[meal.id] || 0) > 0
+                                        ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                                        : 'bg-slate-800/50 text-slate-500 border-slate-700/50'
+                                    }`}>
+                                    <Calendar size={10} />
+                                    {(plannedCounts[meal.id] || 0).toFixed(1)}
+                                </span>
                             </div>
                             <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${meal.type === 'lunch' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/20' :
                                 meal.type === 'dinner' ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/20' :
