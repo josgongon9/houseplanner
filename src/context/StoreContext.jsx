@@ -195,9 +195,6 @@ export const StoreProvider = ({ children }) => {
                                 return; // Already processed, skip
                             }
 
-                            // Mark as processed
-                            transaction.update(menuRef, { processed: true });
-
                             // Calculate stock reductions
                             let mealsToProcess = [];
                             if (freshMenuData.meals && Array.isArray(freshMenuData.meals)) {
@@ -206,19 +203,22 @@ export const StoreProvider = ({ children }) => {
                                 mealsToProcess = [{ mealId: freshMenuData.mealId, portion: 1 }];
                             }
 
-                            // For each meal, reduce stock (within same transaction)
+                            // Perform all READS first
+                            const mealUpdates = [];
                             for (const { mealId, portion } of mealsToProcess) {
-                                const meal = mealsMap[mealId];
-                                if (meal) {
-                                    const mealRef = doc(db, "meals", mealId);
-                                    const mealDoc = await transaction.get(mealRef);
-
-                                    if (mealDoc.exists()) {
-                                        const currentQuantity = mealDoc.data().quantity || 0;
-                                        const newQuantity = Math.max(0, Number(currentQuantity) - Number(portion));
-                                        transaction.update(mealRef, { quantity: newQuantity });
-                                    }
+                                const mealRef = doc(db, "meals", mealId);
+                                const mealDoc = await transaction.get(mealRef);
+                                if (mealDoc.exists()) {
+                                    const currentQuantity = mealDoc.data().quantity || 0;
+                                    const newQuantity = Math.max(0, Number(currentQuantity) - Number(portion));
+                                    mealUpdates.push({ mealRef, newQuantity });
                                 }
+                            }
+
+                            // Perform all WRITES after
+                            transaction.update(menuRef, { processed: true });
+                            for (const update of mealUpdates) {
+                                transaction.update(update.mealRef, { quantity: update.newQuantity });
                             }
 
                             processedCount++;
@@ -363,6 +363,10 @@ export const StoreProvider = ({ children }) => {
     };
 
     const leaveHousehold = async (householdId) => {
+        await removeMember(householdId, user.uid);
+    };
+
+    const removeMember = async (householdId, memberId) => {
         if (!user) return;
 
         // 1. Remove from Household members
@@ -370,17 +374,19 @@ export const StoreProvider = ({ children }) => {
         const houseSnap = await getDoc(houseRef);
         if (houseSnap.exists()) {
             const currentMembers = houseSnap.data().members || [];
-            const newMembers = currentMembers.filter(uid => uid !== user.uid);
+            const newMembers = currentMembers.filter(uid => uid !== memberId);
             await updateDoc(houseRef, { members: newMembers });
         }
 
-        // 2. Clear user's active household if it's the one they are leaving
-        const userRef = doc(db, "users", user.uid);
+        // 2. Clear user's active household if it's the one they are leaving/removed from
+        const userRef = doc(db, "users", memberId);
         const userSnap = await getDoc(userRef);
         if (userSnap.exists() && userSnap.data().householdId === householdId) {
             await updateDoc(userRef, { householdId: null });
-            // If they have other households, we could pick one, but null is safer for now
-            // The app will redirect to setup/join
+        }
+
+        // If current user left their active household, reload
+        if (memberId === user.uid && householdId === household?.id) {
             window.location.reload();
         }
     };
@@ -481,7 +487,7 @@ export const StoreProvider = ({ children }) => {
             meals, menu, expenses,
             addMeal, updateMealStock, updateMeal, deleteMeal, setMenuItem, addExpense, updateExpense, deleteExpense,
             // User Actions
-            switchHousehold, leaveHousehold,
+            switchHousehold, leaveHousehold, removeMember,
             // Admin exports
             adminAddUserToHousehold, adminCreateHousehold, adminUpdateHousehold, adminSwitchHousehold, adminCreateGhostUser,
             adminDeleteUser, adminDeleteHousehold,

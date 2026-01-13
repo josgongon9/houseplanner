@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, addDoc, updateDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc, getDocs, where, serverTimestamp, runTransaction } from "firebase/firestore";
+import { getFirestore, collection, addDoc, updateDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc, getDocs, where, serverTimestamp, runTransaction, documentId } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut, onAuthStateChanged } from "firebase/auth";
 
 // TODO: Replace with your Firebase project configuration
@@ -27,4 +27,4 @@ try {
 
 const googleProvider = new GoogleAuthProvider();
 
-export { db, auth, googleProvider, signInWithPopup, signInWithRedirect, signOut, onAuthStateChanged, collection, addDoc, updateDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc, getDocs, where, serverTimestamp, runTransaction };
+export { db, auth, googleProvider, signInWithPopup, signInWithRedirect, signOut, onAuthStateChanged, collection, addDoc, updateDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc, getDocs, where, serverTimestamp, runTransaction, documentId };
