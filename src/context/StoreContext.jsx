@@ -403,6 +403,28 @@ export const StoreProvider = ({ children }) => {
         await deleteDoc(doc(db, "expenses", id));
     }
 
+    const addExpenseCategory = async (name, icon) => {
+        if (!user || !household) return;
+        const newCategory = {
+            id: `custom_${Date.now()}`,
+            name,
+            icon: icon || '📦',
+            color: '#64748B' // Default slate color
+        };
+        const currentCategories = household.expenseCategories || [];
+        await updateDoc(doc(db, "households", household.id), {
+            expenseCategories: [...currentCategories, newCategory]
+        });
+    };
+
+    const deleteExpenseCategory = async (categoryId) => {
+        if (!user || !household) return;
+        const currentCategories = household.expenseCategories || [];
+        await updateDoc(doc(db, "households", household.id), {
+            expenseCategories: currentCategories.filter(c => c.id !== categoryId)
+        });
+    };
+
     // Admin Actions
     const adminAddUserToHousehold = async (userId, householdId) => {
         if (!user || userRole !== 'admin') return;
@@ -486,6 +508,7 @@ export const StoreProvider = ({ children }) => {
             createHousehold, joinHousehold,
             meals, menu, expenses,
             addMeal, updateMealStock, updateMeal, deleteMeal, setMenuItem, addExpense, updateExpense, deleteExpense,
+            addExpenseCategory, deleteExpenseCategory,
             // User Actions
             switchHousehold, leaveHousehold, removeMember,
             // Admin exports

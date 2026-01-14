@@ -5,15 +5,29 @@ import { format, parseISO, startOfMonth, endOfMonth, subMonths, addMonths, isSam
 import { es } from 'date-fns/locale';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip as RechartsTooltip } from 'recharts';
 
+const DEFAULT_CATEGORIES = [
+    { id: 'groceries', name: 'Supermercado', icon: '🛒', color: '#F97316' },
+    { id: 'dining', name: 'Restaurante', icon: '🍽️', color: '#3B82F6' },
+    { id: 'transport', name: 'Transporte', icon: '🚗', color: '#8B5CF6' },
+    { id: 'home', name: 'Hogar', icon: '🏠', color: '#F59E0B' },
+    { id: 'settlement', name: 'Liquidación', icon: '🤝', color: '#10B981' },
+    { id: 'other', name: 'Otro', icon: '📦', color: '#64748B' }
+];
+
 export default function Expenses() {
-    const { expenses, addExpense, updateExpense, deleteExpense, householdMembers, user } = useStore();
+    const { expenses, addExpense, updateExpense, deleteExpense, householdMembers, user, household, addExpenseCategory, deleteExpenseCategory } = useStore();
     const [viewMode, setViewMode] = useState('month'); // 'month' | 'year'
     const [activeTab, setActiveTab] = useState('expenses'); // 'expenses' | 'balances' | 'charts'
     const [currentMonth, setCurrentMonth] = useState(new Date());
 
+    const categories = useMemo(() => {
+        return [...DEFAULT_CATEGORIES, ...(household?.expenseCategories || [])];
+    }, [household]);
+
     // Modal State
     const [showAdd, setShowAdd] = useState(false);
     const [editingId, setEditingId] = useState(null); // ID of expense being edited
+    const [showManageCategories, setShowManageCategories] = useState(false);
 
     // Form State
     const [title, setTitle] = useState("");
@@ -23,6 +37,10 @@ export default function Expenses() {
     const [splitAmong, setSplitAmong] = useState([]); // Array of UIDs
     const [splitMode, setSplitMode] = useState('equal'); // 'equal' | 'custom'
     const [customAmounts, setCustomAmounts] = useState({}); // { uid: amount }
+
+    // New Category State
+    const [newCatName, setNewCatName] = useState("");
+    const [newCatIcon, setNewCatIcon] = useState("📦");
 
     // Filter expenses by selected month
     const monthlyExpenses = useMemo(() => {
@@ -115,12 +133,24 @@ export default function Expenses() {
         }
     }
 
+    const sanitizeAmount = (val) => {
+        if (!val) return "";
+        // If it has decimals, limit to 2
+        if (val.includes('.')) {
+            const parts = val.split('.');
+            if (parts[1].length > 2) {
+                return parts[0] + '.' + parts[1].substring(0, 2);
+            }
+        }
+        return val;
+    };
+
     const handleCustomAmountChange = (uid, val) => {
         setCustomAmounts(prev => ({
             ...prev,
-            [uid]: val
+            [uid]: sanitizeAmount(val)
         }));
-    }
+    };
 
     const customSum = useMemo(() => {
         return Object.values(customAmounts).reduce((acc, curr) => acc + (Number(curr) || 0), 0);
@@ -134,23 +164,26 @@ export default function Expenses() {
         householdMembers.forEach(m => balanceMap[m.id] = 0);
 
         monthlyExpenses.forEach(exp => {
-            const cost = exp.amount;
+            const cost = Number(exp.amount);
             const payer = exp.payerId;
             const beneficiaries = exp.splitAmong || []; // UIDs involved
 
-            balanceMap[payer] = (balanceMap[payer] || 0) + cost;
+            if (!balanceMap.hasOwnProperty(payer)) balanceMap[payer] = 0;
+            balanceMap[payer] += cost;
 
             if (exp.splitMode === 'custom' && exp.customAmounts) {
                 // Custom Split
                 Object.entries(exp.customAmounts).forEach(([uid, amt]) => {
-                    balanceMap[uid] = (balanceMap[uid] || 0) - Number(amt);
+                    if (!balanceMap.hasOwnProperty(uid)) balanceMap[uid] = 0;
+                    balanceMap[uid] -= Number(amt);
                 });
             } else {
                 // Equal Split (Default)
                 if (beneficiaries.length === 0) return;
                 const splitAmount = cost / beneficiaries.length;
                 beneficiaries.forEach(uid => {
-                    balanceMap[uid] = (balanceMap[uid] || 0) - splitAmount;
+                    if (!balanceMap.hasOwnProperty(uid)) balanceMap[uid] = 0;
+                    balanceMap[uid] -= splitAmount;
                 });
             }
         });
@@ -158,8 +191,8 @@ export default function Expenses() {
         return Object.entries(balanceMap)
             .map(([uid, amount]) => ({
                 uid,
-                amount,
-                member: householdMembers.find(m => m.id === uid)
+                amount: Math.round(amount * 100) / 100, // Round to cents
+                member: householdMembers.find(m => m.id === uid) || { id: uid, displayName: 'Ex-miembro' }
             }))
             .sort((a, b) => b.amount - a.amount);
     }, [monthlyExpenses, householdMembers]);
@@ -167,38 +200,47 @@ export default function Expenses() {
     // Calculate simple debts (Who pays whom)
     const transactions = useMemo(() => {
         let debtList = [];
-        let bals = balances.map(b => ({ ...b }));
+        // Clone and convert to discrete cents to avoid float hell
+        let bals = balances.map(b => ({
+            ...b,
+            cents: Math.round(b.amount * 100)
+        }));
 
-        let i = 0;
-        let j = bals.length - 1;
+        // Sort: Creditors (positive) first, Debtors (negative) last
+        bals.sort((a, b) => b.cents - a.cents);
+
+        let i = 0; // Creditor pointer
+        let j = bals.length - 1; // Debtor pointer
 
         while (i < j) {
-            let debtor = bals[j];  // Most negative
-            let creditor = bals[i]; // Most positive
+            let creditor = bals[i];
+            let debtor = bals[j];
 
-            if (Math.abs(debtor.amount) < 0.01) { j--; continue; }
-            if (Math.abs(creditor.amount) < 0.01) { i++; continue; }
+            if (creditor.cents <= 0) { i++; continue; }
+            if (debtor.cents >= 0) { j--; continue; }
 
-            let amount = Math.min(Math.abs(debtor.amount), creditor.amount);
+            let amountCents = Math.min(creditor.cents, Math.abs(debtor.cents));
 
-            debtList.push({
-                from: debtor.member,
-                to: creditor.member,
-                amount: amount
-            });
+            if (amountCents > 0) {
+                debtList.push({
+                    from: debtor.member,
+                    to: creditor.member,
+                    amount: amountCents / 100
+                });
 
-            debtor.amount += amount;
-            creditor.amount -= amount;
+                creditor.cents -= amountCents;
+                debtor.cents += amountCents;
+            }
 
-            if (Math.abs(debtor.amount) < 0.01) j--;
-            if (Math.abs(creditor.amount) < 0.01) i++;
+            if (creditor.cents === 0) i++;
+            if (debtor.cents === 0) j--;
         }
         return debtList;
     }, [balances]);
 
     const totalMonthly = monthlyExpenses
         .filter(e => e.category !== 'settlement')
-        .reduce((acc, curr) => acc + curr.amount, 0);
+        .reduce((acc, curr) => acc + Number(curr.amount), 0);
 
     const isSettled = transactions.length === 0 && monthlyExpenses.length > 0;
 
@@ -215,15 +257,41 @@ export default function Expenses() {
             .reduce((acc, curr) => acc + curr.amount, 0);
     };
 
+    // Calculate total paid per person for the current month
+    const individualPaid = useMemo(() => {
+        const paidMap = {};
+        householdMembers.forEach(m => paidMap[m.id] = 0);
+
+        monthlyExpenses.forEach(exp => {
+            if (exp.category === 'settlement') return;
+            paidMap[exp.payerId] = (paidMap[exp.payerId] || 0) + exp.amount;
+        });
+
+        return Object.entries(paidMap).map(([uid, amount]) => ({
+            uid,
+            amount,
+            member: householdMembers.find(m => m.id === uid)
+        })).sort((a, b) => b.amount - a.amount);
+    }, [monthlyExpenses, householdMembers]);
+
+    const individualChartData = useMemo(() => {
+        const colors = ['#10B981', '#3B82F6', '#F59E0B', '#F97316', '#8B5CF6', '#EC4899'];
+        return individualPaid
+            .filter(p => p.amount > 0)
+            .map((p, i) => ({
+                name: p.member?.displayName?.split(' ')[0] || '???',
+                value: p.amount,
+                color: colors[i % colors.length]
+            }));
+    }, [individualPaid]);
+
     // --- CHART DATA ---
     const chartData = useMemo(() => {
-        const data = {
-            groceries: 0,
-            dining: 0,
-            transport: 0,
-            home: 0,
-            other: 0
-        };
+        const data = {};
+        // Initialize all categories with 0 but only if they are not settlement
+        categories.forEach(c => {
+            if (c.id !== 'settlement') data[c.id] = 0;
+        });
 
         monthlyExpenses.forEach(e => {
             if (e.category === 'settlement') return;
@@ -234,23 +302,16 @@ export default function Expenses() {
             }
         });
 
-        const categoriesMap = {
-            groceries: { name: 'Supermercado', color: '#F97316' }, // Orange 500
-            dining: { name: 'Restaurante', color: '#3B82F6' }, // Blue 500
-            transport: { name: 'Transporte', color: '#8B5CF6' }, // Violet 500
-            home: { name: 'Hogar', color: '#F59E0B' }, // Amber 500
-            other: { name: 'Otro', color: '#64748B' } // Slate 500
-        };
-
-        return Object.entries(data)
-            .filter(([key, value]) => value > 0)
-            .map(([key, value]) => ({
-                name: categoriesMap[key]?.name || 'Otro',
-                value,
-                color: categoriesMap[key]?.color || '#64748B'
+        return categories
+            .filter(c => c.id !== 'settlement' && data[c.id] > 0)
+            .map(c => ({
+                name: c.name,
+                icon: c.icon,
+                value: data[c.id],
+                color: c.color
             }))
             .sort((a, b) => b.value - a.value);
-    }, [monthlyExpenses]);
+    }, [monthlyExpenses, categories]);
 
     return (
         <div className="p-4 space-y-4 pb-24">
@@ -404,7 +465,7 @@ export default function Expenses() {
                                                 <span className="absolute left-3 top-3 text-emerald-500">€</span>
                                                 <input
                                                     type="number" step="0.01" min="0.01" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 pl-7 focus:border-emerald-500 outline-none text-right font-bold"
-                                                    value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" required
+                                                    value={amount} onChange={e => setAmount(sanitizeAmount(e.target.value))} placeholder="0.00" required
                                                 />
                                             </div>
                                         </div>
@@ -412,20 +473,76 @@ export default function Expenses() {
 
                                     {/* Category */}
                                     <div>
-                                        <label className="block text-xs font-medium text-slate-400 mb-1">Categoría *</label>
-                                        <select
-                                            className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none"
-                                            value={category} onChange={e => setCategory(e.target.value)}
-                                            required
-                                        >
-                                            <option value="" disabled>Selecciona una categoría</option>
-                                            <option value="groceries">🛒 Supermercado</option>
-                                            <option value="dining">🍽️ Restaurante</option>
-                                            <option value="transport">🚗 Transporte</option>
-                                            <option value="home">🏠 Hogar</option>
-                                            <option value="settlement">🤝 Liquidación</option>
-                                            <option value="other">📦 Otro</option>
-                                        </select>
+                                        <div className="flex justify-between items-center mb-1">
+                                            <label className="block text-xs font-medium text-slate-400">Categoría *</label>
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowManageCategories(!showManageCategories)}
+                                                className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider hover:underline"
+                                            >
+                                                {showManageCategories ? 'Cerrar Gestión' : 'Gestionar Categorías'}
+                                            </button>
+                                        </div>
+
+                                        {showManageCategories ? (
+                                            <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 space-y-3 animate-in fade-in zoom-in-95 duration-200">
+                                                <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
+                                                    {household?.expenseCategories?.map(cat => (
+                                                        <div key={cat.id} className="flex items-center justify-between bg-surface p-2 rounded-lg border border-slate-800">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-lg">{cat.icon}</span>
+                                                                <span className="text-sm font-medium">{cat.name}</span>
+                                                            </div>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => deleteExpenseCategory(cat.id)}
+                                                                className="p-1.5 text-slate-500 hover:text-red-400 transition-colors"
+                                                            >
+                                                                <Trash size={14} />
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+
+                                                <div className="flex gap-2 pt-2 border-t border-slate-800">
+                                                    <input
+                                                        className="w-10 bg-slate-800 border border-slate-700 rounded-lg p-2 text-center outline-none focus:border-emerald-500 text-lg"
+                                                        value={newCatIcon} onChange={e => setNewCatIcon(e.target.value)}
+                                                        placeholder="📦"
+                                                    />
+                                                    <input
+                                                        className="flex-1 bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm outline-none focus:border-emerald-500"
+                                                        value={newCatName} onChange={e => setNewCatName(e.target.value)}
+                                                        placeholder="Nueva categoría..."
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            if (newCatName.trim()) {
+                                                                addExpenseCategory(newCatName, newCatIcon);
+                                                                setNewCatName("");
+                                                            }
+                                                        }}
+                                                        className="bg-emerald-500 text-white px-3 rounded-lg font-bold text-xs"
+                                                    >
+                                                        Añadir
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <select
+                                                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none"
+                                                value={category} onChange={e => setCategory(e.target.value)}
+                                                required
+                                            >
+                                                <option value="" disabled>Selecciona una categoría</option>
+                                                {categories.map(cat => (
+                                                    <option key={cat.id} value={cat.id}>
+                                                        {cat.icon} {cat.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        )}
                                     </div>
 
                                     {/* Payer */}
@@ -552,6 +669,21 @@ export default function Expenses() {
                     {/* === LIST VIEW === */}
                     {activeTab === 'expenses' && (
                         <div className="space-y-4 animate-in slide-in-from-right-4">
+                            {/* Individual Summary Row */}
+                            {monthlyExpenses.length > 0 && (
+                                <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                                    {individualPaid.map(p => (
+                                        <div key={p.uid} className="bg-surface border border-slate-700 rounded-xl p-2 px-3 flex items-center gap-2 shrink-0 shadow-sm">
+                                            <Avatar url={p.member?.photoURL} name={p.member?.displayName} size="xs" />
+                                            <div className="flex flex-col">
+                                                <span className="text-[10px] text-slate-500 font-bold uppercase leading-none">{p.member?.displayName?.split(' ')[0]}</span>
+                                                <span className="text-sm font-bold text-white leading-none mt-1">{p.amount.toFixed(0)}€</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
                             {monthlyExpenses.length === 0 ? (
                                 <div className="text-center py-20 opacity-50 space-y-4">
                                     <div className="bg-slate-800 w-20 h-20 rounded-full flex items-center justify-center mx-auto text-slate-600">
@@ -576,12 +708,13 @@ export default function Expenses() {
                                             <div className="flex items-center gap-3">
                                                 <div className={`p-3 rounded-xl ${exp.category === 'groceries' ? 'bg-orange-500/10 text-orange-400' :
                                                     exp.category === 'dining' ? 'bg-blue-500/10 text-blue-400' :
-                                                        exp.category === 'settlement' ? 'bg-emerald-500 text-white' :
-                                                            'bg-slate-700/50 text-slate-300'
+                                                        exp.category === 'transport' ? 'bg-violet-500/10 text-violet-400' :
+                                                            exp.category === 'home' ? 'bg-amber-500/10 text-amber-400' :
+                                                                exp.category === 'settlement' ? 'bg-emerald-500 text-white' :
+                                                                    'bg-slate-700/50 text-slate-300'
                                                     }`}>
-                                                    {exp.category === 'groceries' ? '🛒' :
-                                                        exp.category === 'dining' ? '🍽️' :
-                                                            exp.category === 'settlement' ? <ArrowRightLeft size={16} /> : '📦'}
+                                                    {exp.category === 'settlement' ? <ArrowRightLeft size={16} /> :
+                                                        categories.find(c => c.id === exp.category)?.icon || '📦'}
                                                 </div>
                                                 <div>
                                                     <h4 className={`font-bold text-base ${isSettlement ? 'text-emerald-400' : ''}`}>{exp.title}</h4>
@@ -613,49 +746,106 @@ export default function Expenses() {
                                     <p>No hay datos suficientes para gráficos.</p>
                                 </div>
                             ) : (
-                                <div className="bg-surface p-6 rounded-2xl border border-slate-700 flex flex-col items-center">
-                                    <h3 className="font-bold text-lg text-slate-200 w-full mb-4">Gasto por Categorías</h3>
-                                    <div className="w-full h-64 mb-4">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <PieChart>
-                                                <Pie
-                                                    data={chartData}
-                                                    cx="50%"
-                                                    cy="50%"
-                                                    innerRadius={60}
-                                                    outerRadius={80}
-                                                    paddingAngle={5}
-                                                    dataKey="value"
-                                                >
-                                                    {chartData.map((entry, index) => (
-                                                        <Cell key={`cell-${index}`} fill={entry.color} stroke="rgba(0,0,0,0)" />
-                                                    ))}
-                                                </Pie>
-                                                <RechartsTooltip
-                                                    formatter={(value) => `${value.toFixed(2)}€`}
-                                                    contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '12px', color: '#fff' }}
-                                                    itemStyle={{ color: '#fff' }}
-                                                />
-                                            </PieChart>
-                                        </ResponsiveContainer>
+                                <div className="space-y-6">
+                                    {/* Categories Chart */}
+                                    <div className="bg-surface p-6 rounded-2xl border border-slate-700 flex flex-col items-center">
+                                        <h3 className="font-bold text-lg text-slate-200 w-full mb-4 flex items-center gap-2">
+                                            <Grid size={20} className="text-emerald-500" /> Gasto por Categorías
+                                        </h3>
+                                        <div className="w-full h-64 mb-4">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <PieChart>
+                                                    <Pie
+                                                        data={chartData}
+                                                        cx="50%"
+                                                        cy="50%"
+                                                        innerRadius={60}
+                                                        outerRadius={80}
+                                                        paddingAngle={5}
+                                                        dataKey="value"
+                                                    >
+                                                        {chartData.map((entry, index) => (
+                                                            <Cell key={`cell-${index}`} fill={entry.color} stroke="rgba(0,0,0,0)" />
+                                                        ))}
+                                                    </Pie>
+                                                    <RechartsTooltip
+                                                        formatter={(value) => `${value.toFixed(2)}€`}
+                                                        contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '12px', color: '#fff' }}
+                                                        itemStyle={{ color: '#fff' }}
+                                                    />
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        </div>
+
+                                        <div className="w-full space-y-3">
+                                            {chartData.map((d, i) => (
+                                                <div key={i} className="flex justify-between items-center p-2 rounded-lg hover:bg-slate-800/50 transition-colors">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: d.color }}></div>
+                                                        <span className="text-xl">{d.icon}</span>
+                                                        <span className="text-sm font-medium text-slate-300">{d.name}</span>
+                                                    </div>
+                                                    <div className="flex flex-col items-end">
+                                                        <span className="font-bold text-white">{d.value.toFixed(2)}€</span>
+                                                        <span className="text-[10px] text-slate-500">{((d.value / totalMonthly) * 100).toFixed(0)}%</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            <div className="border-t border-slate-700 mt-4 pt-2 flex justify-between items-center font-bold text-lg px-2 text-white">
+                                                <span>Total Hogar</span>
+                                                <span>{totalMonthly.toFixed(2)}€</span>
+                                            </div>
+                                        </div>
                                     </div>
 
-                                    <div className="w-full space-y-3">
-                                        {chartData.map((d, i) => (
-                                            <div key={i} className="flex justify-between items-center p-2 rounded-lg hover:bg-slate-800/50 transition-colors">
-                                                <div className="flex items-center gap-2">
-                                                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: d.color }}></div>
-                                                    <span className="text-sm font-medium text-slate-300">{d.name}</span>
-                                                </div>
-                                                <div className="flex flex-col items-end">
-                                                    <span className="font-bold text-white">{d.value.toFixed(2)}€</span>
-                                                    <span className="text-[10px] text-slate-500">{((d.value / totalMonthly) * 100).toFixed(0)}%</span>
-                                                </div>
-                                            </div>
-                                        ))}
-                                        <div className="border-t border-slate-700 mt-4 pt-2 flex justify-between items-center font-bold text-lg px-2">
-                                            <span>Total</span>
-                                            <span>{totalMonthly.toFixed(2)}€</span>
+                                    {/* Individual Chart */}
+                                    <div className="bg-surface p-6 rounded-2xl border border-slate-700 flex flex-col items-center">
+                                        <h3 className="font-bold text-lg text-slate-200 w-full mb-4 flex items-center gap-2">
+                                            <User size={20} className="text-emerald-500" /> Gasto por Persona
+                                        </h3>
+                                        {/* ... PieChart remains the same ... */}
+                                        <div className="w-full h-64 mb-4">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <PieChart>
+                                                    <Pie
+                                                        data={individualChartData}
+                                                        cx="50%"
+                                                        cy="50%"
+                                                        innerRadius={60}
+                                                        outerRadius={80}
+                                                        paddingAngle={5}
+                                                        dataKey="value"
+                                                    >
+                                                        {individualChartData.map((entry, index) => (
+                                                            <Cell key={`cell-${index}`} fill={entry.color} stroke="rgba(0,0,0,0)" />
+                                                        ))}
+                                                    </Pie>
+                                                    <RechartsTooltip
+                                                        formatter={(value) => `${value.toFixed(2)}€`}
+                                                        contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '12px', color: '#fff' }}
+                                                        itemStyle={{ color: '#fff' }}
+                                                    />
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        </div>
+
+                                        <div className="w-full space-y-3">
+                                            {individualPaid.filter(p => p.amount > 0).map((p, i) => {
+                                                const color = ['#10B981', '#3B82F6', '#F59E0B', '#F97316', '#8B5CF6', '#EC4899'][i % 6];
+                                                return (
+                                                    <div key={p.uid} className="flex justify-between items-center p-2 rounded-lg hover:bg-slate-800/50 transition-colors">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }}></div>
+                                                            <Avatar url={p.member?.photoURL} name={p.member?.displayName} size="xs" />
+                                                            <span className="text-sm font-medium text-slate-300">{p.member?.displayName?.split(' ')[0]}</span>
+                                                        </div>
+                                                        <div className="flex flex-col items-end">
+                                                            <span className="font-bold text-white">{p.amount.toFixed(2)}€</span>
+                                                            <span className="text-[10px] text-slate-500">{((p.amount / totalMonthly) * 100).toFixed(0)}%</span>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     </div>
                                 </div>
