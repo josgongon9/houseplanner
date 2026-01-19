@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../context/StoreContext';
-import { db, collection, query, where, getDocs, doc, updateDoc, documentId } from '../lib/firebase';
+import { db, collection, query, where, getDocs, doc, updateDoc, documentId, getDoc } from '../lib/firebase';
 import { User, Home, LogOut, Check, Plus, Loader2, UserMinus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export default function Profile() {
-    const { user, household, switchHousehold, leaveHousehold, removeMember, logout, createHousehold, joinHousehold } = useStore();
+    const { user, household, switchHousehold, leaveHousehold, removeMember, logout, createHousehold, joinHousehold, toggleFinanceModule } = useStore();
+    const [userInfo, setUserInfo] = useState(null); // Local storage of extended user data
     const [myHouseholds, setMyHouseholds] = useState([]);
     const [loadingHomes, setLoadingHomes] = useState(true);
     const [expandedHome, setExpandedHome] = useState(null);
@@ -20,6 +21,13 @@ export default function Profile() {
 
     useEffect(() => {
         if (!user) return;
+
+        // Fetch User Info for Toggles
+        const fetchUserData = async () => {
+            const snap = await getDoc(doc(db, 'users', user.uid));
+            if (snap.exists()) setUserInfo(snap.data());
+        }
+        fetchUserData();
 
         const fetchHomes = async () => {
             try {
@@ -160,6 +168,32 @@ export default function Profile() {
                 <div>
                     <h2 className="font-bold text-lg text-white">{user?.displayName}</h2>
                     <p className="text-sm text-slate-400">{user?.email}</p>
+                </div>
+            </div>
+
+            {/* Feature Toggles */}
+            <div className="bg-surface p-6 rounded-2xl border border-slate-700 shadow-lg space-y-4">
+                <h3 className="font-bold text-slate-300 flex items-center gap-2">
+                    <Check size={20} className="text-emerald-500" /> Configuración de Módulos
+                </h3>
+                <div className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-800/50 transition-colors">
+                    <div>
+                        <h4 className="font-bold text-white">Finanzas Personales</h4>
+                        <p className="text-xs text-slate-400">Activa el control de patrimonio, inversiones y año fiscal.</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                            type="checkbox"
+                            className="sr-only peer"
+                            checked={userInfo?.financeEnabled || false}
+                            onChange={async (e) => {
+                                const newVal = e.target.checked;
+                                setUserInfo(prev => ({ ...prev, financeEnabled: newVal })); // Optimistic
+                                await toggleFinanceModule(newVal);
+                            }}
+                        />
+                        <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-emerald-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                    </label>
                 </div>
             </div>
 

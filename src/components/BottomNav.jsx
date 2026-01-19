@@ -4,7 +4,7 @@ import clsx from 'clsx';
 import { useStore } from '../context/StoreContext';
 
 export default function BottomNav() {
-    const { userRole } = useStore();
+    const { userRole, userData } = useStore();
     const location = useLocation();
     const currentPath = location.pathname;
 
@@ -23,6 +23,15 @@ export default function BottomNav() {
                     <Wallet size={20} />
                     <span className="text-[10px] font-medium">Gastos</span>
                 </Link>
+
+                {/* FINANCE MODULE LINK */}
+                {userData?.financeEnabled && (
+                    <Link to="/finances" className={clsx("flex flex-col items-center gap-1 p-2 w-full", currentPath === "/finances" ? "text-primary" : "text-amber-500/50")}>
+                        <span className="text-xl">📈</span>
+                        <span className="text-[10px] font-medium">Finanzas</span>
+                    </Link>
+                )}
+
                 <Link to="/profile" className={clsx("flex flex-col items-center gap-1 p-2 w-full", currentPath === "/profile" ? "text-primary" : "text-slate-400")}>
                     <User size={20} />
                     <span className="text-[10px] font-medium">Perfil</span>

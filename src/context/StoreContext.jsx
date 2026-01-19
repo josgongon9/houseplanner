@@ -11,6 +11,7 @@ export const useStore = () => useContext(StoreContext);
 
 export const StoreProvider = ({ children }) => {
     const [user, setUser] = useState(null);
+    const [userData, setUserData] = useState(null); // Full user profile including settings
     const [userRole, setUserRole] = useState(null);
     const [household, setHousehold] = useState(null); // { id, name, code, createdBy }
     const [householdMembers, setHouseholdMembers] = useState([]); // Array of user profiles
@@ -24,6 +25,7 @@ export const StoreProvider = ({ children }) => {
 
     // Listener Ref to avoid leaks when switching households
     const householdListenerRef = useRef(null);
+    const userListenerRef = useRef(null);
 
     // 1. Authentication & Profile Sync
     useEffect(() => {
@@ -32,6 +34,7 @@ export const StoreProvider = ({ children }) => {
         const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
             setUser(currentUser);
             if (!currentUser) {
+                setUserData(null);
                 setHousehold(null);
                 setHouseholdMembers([]);
                 setMeals([]);
@@ -39,42 +42,44 @@ export const StoreProvider = ({ children }) => {
                 setExpenses([]);
                 setUserRole(null);
                 setIsLoading(false);
+                if (userListenerRef.current) userListenerRef.current();
             } else {
-                // Fetch User Profile
-                const userRef = doc(db, "users", currentUser.uid);
-                try {
-                    const userSnap = await getDoc(userRef);
-                    if (userSnap.exists()) {
-                        const userData = userSnap.data();
-                        setUserRole(userData.role || 'user');
-                        // If user has a householdId, fetch household details immediately
-                        if (userData.householdId) {
-                            fetchHousehold(userData.householdId);
-                        } else {
+                // Real-time listener for User Profile
+                if (userListenerRef.current) userListenerRef.current();
+                userListenerRef.current = onSnapshot(doc(db, "users", currentUser.uid), (docSnap) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        setUserData(data);
+                        setUserRole(data.role || 'user');
+
+                        // Handle Household connection
+                        if (data.householdId && (!household || household.id !== data.householdId)) {
+                            fetchHousehold(data.householdId);
+                        } else if (!data.householdId) {
                             setHousehold(null);
-                            setIsLoading(false); // Done loading (user needs to setup home)
+                            setIsLoading(false);
                         }
                     } else {
-                        // Create Profile
-                        await setDoc(userRef, {
+                        // Create Profile if missing
+                        setDoc(doc(db, "users", currentUser.uid), {
                             email: currentUser.email,
                             displayName: currentUser.displayName,
                             photoURL: currentUser.photoURL,
                             role: 'user',
                             createdAt: new Date().toISOString()
                         });
-                        setUserRole('user');
-                        setHousehold(null);
-                        setIsLoading(false);
                     }
-                } catch (e) {
-                    console.error("Error fetching user", e);
+                }, (error) => {
+                    console.error("Error fetching user", error);
                     setIsLoading(false);
-                }
+                });
             }
         });
 
-        return () => unsubscribeAuth();
+        return () => {
+            unsubscribeAuth();
+            if (userListenerRef.current) userListenerRef.current();
+        };
     }, []);
 
     // Helper: Fetch Household Details
@@ -478,6 +483,12 @@ export const StoreProvider = ({ children }) => {
         // The listener in useEffect will handle the context switch
     }
 
+    const toggleFinanceModule = async (enabled) => {
+        if (!user) return;
+        await updateDoc(doc(db, "users", user.uid), { financeEnabled: enabled });
+        // The user listener will pick this up automatically as it syncs the 'user' state
+    };
+
     const adminCreateGhostUser = async (name) => {
         if (!user || userRole !== 'admin') return;
         const fakeUid = `ghost_${Date.now()}`;
@@ -504,7 +515,7 @@ export const StoreProvider = ({ children }) => {
 
     return (
         <StoreContext.Provider value={{
-            user, userRole, household, householdMembers, login, logout,
+            user, userData, userRole, household, householdMembers, login, logout,
             createHousehold, joinHousehold,
             meals, menu, expenses,
             addMeal, updateMealStock, updateMeal, deleteMeal, setMenuItem, addExpense, updateExpense, deleteExpense,
@@ -514,6 +525,7 @@ export const StoreProvider = ({ children }) => {
             // Admin exports
             adminAddUserToHousehold, adminCreateHousehold, adminUpdateHousehold, adminSwitchHousehold, adminCreateGhostUser,
             adminDeleteUser, adminDeleteHousehold,
+            toggleFinanceModule,
             isLoading
         }}>
             {children}
