@@ -3,7 +3,7 @@ import { useStore } from '../context/StoreContext';
 import { db, doc, getDoc, setDoc, onSnapshot, updateDoc, collection, addDoc, query, where, orderBy, getDocs, deleteDoc, runTransaction } from '../lib/firebase';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { TrendingUp, PieChart as PieIcon, ArrowUpCircle, ArrowDownCircle, DollarSign, Plus, Trash2, Edit2, Save, X, ChevronLeft, ChevronRight, BarChart2, Settings } from 'lucide-react';
+import { TrendingUp, PieChart as PieIcon, ArrowUpCircle, ArrowDownCircle, DollarSign, Plus, Trash2, Edit2, Save, X, ChevronLeft, ChevronRight, BarChart2, Settings, Wallet } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
 
 export default function Finances() {
@@ -15,6 +15,7 @@ export default function Finances() {
     const [financeData, setFinanceData] = useState(null); // { incomeCategories: [], expenseCategories: [], monthly: { 0: { incomes: {}, expenses: {} }, ... } }
     const [stocks, setStocks] = useState([]);
     const [dividends, setDividends] = useState([]);
+    const [savings, setSavings] = useState([]);
 
     // UI State
     const [isLoading, setIsLoading] = useState(true);
@@ -71,10 +72,24 @@ export default function Finances() {
             setDividends(snap.docs.map(d => ({ id: d.id, ...d.data() })));
         });
 
+        // Fetch Savings (All time history for balance)
+        // Fetch Savings (All time history for balance)
+        const savingsQ = query(
+            collection(db, 'users', user.uid, 'investments'),
+            where('type', '==', 'savings')
+        );
+        const unsubSavings = onSnapshot(savingsQ, (snap) => {
+            const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            // Sort client-side to avoid index requirement
+            data.sort((a, b) => new Date(b.date) - new Date(a.date));
+            setSavings(data);
+        });
+
         return () => {
             unsubscribe();
             unsubStocks();
             unsubDividends();
+            unsubSavings();
         }
     }, [user, year]);
 
@@ -244,10 +259,16 @@ export default function Finances() {
                 >
                     Inversiones
                 </button>
+                <button
+                    onClick={() => setView('accounts')}
+                    className={`pb-2 px-4 font-bold text-sm transition-colors border-b-2 ${view === 'accounts' ? 'border-amber-500 text-amber-400' : 'border-transparent text-slate-400'}`}
+                >
+                    Cuentas
+                </button>
             </div>
 
             {/* VIEWS */}
-            {view === 'budget' ? (
+            {view === 'budget' && (
                 <BudgetView
                     year={year}
                     data={financeData}
@@ -255,11 +276,21 @@ export default function Finances() {
                     pieData={pieData}
                     totals={yearlyTotals}
                 />
-            ) : (
+            )}
+
+            {view === 'investments' && (
                 <InvestmentsView
                     year={year}
                     stocks={stocks}
                     dividends={dividends}
+                    userId={user.uid}
+                />
+            )}
+
+            {view === 'accounts' && (
+                <AccountsView
+                    year={year}
+                    transactions={savings}
                     userId={user.uid}
                 />
             )}
@@ -805,6 +836,114 @@ const InvestmentsView = ({ year, stocks, dividends, userId }) => {
             <div className="bg-blue-500/10 border border-blue-500/30 p-4 rounded-xl text-xs text-blue-300">
                 ℹ️ <b>Nota fiscal:</b> Estos datos son meramente informativos para tu control personal y facilitación de la declaración de la renta. Verifica siempre los datos con tu broker.
             </div>
+        </div>
+    )
+}
+
+const AccountsView = ({ year, transactions, userId }) => {
+    const [isAdding, setIsAdding] = useState(false);
+    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+    const [concept, setConcept] = useState("");
+    const [amount, setAmount] = useState("");
+
+    // Calculations
+    const totalBalance = transactions.reduce((acc, curr) => acc + curr.amount, 0);
+    const yearContribution = transactions
+        .filter(t => t.year === year && t.amount > 0)
+        .reduce((acc, curr) => acc + curr.amount, 0);
+
+    const handleAdd = async (e) => {
+        e.preventDefault();
+
+        await addDoc(collection(db, 'users', userId, 'investments'), {
+            type: 'savings',
+            date,
+            year: Number(date.split('-')[0]), // Use the date's year, not just the current view year
+            concept,
+            amount: Number(amount),
+            createdAt: new Date().toISOString()
+        });
+
+        setIsAdding(false);
+        setConcept(""); setAmount("");
+    };
+
+    const handleDelete = async (id) => {
+        if (!confirm('¿Eliminar este movimiento?')) return;
+        await deleteDoc(doc(db, 'users', userId, 'investments', id));
+    };
+
+    return (
+        <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row gap-4">
+                <div className="flex-1 p-4 rounded-xl border bg-surface border-slate-700">
+                    <div className="flex items-center gap-3 mb-2">
+                        <div className="bg-emerald-500/20 p-2 rounded-lg text-emerald-400"><Wallet size={20} /></div>
+                        <h3 className="font-medium text-slate-400 text-sm">Saldo Cuenta Remunerada</h3>
+                    </div>
+                    <p className="text-3xl font-bold text-white">{totalBalance.toFixed(2)}€</p>
+                    <p className="text-xs text-slate-500 mt-1">Saldo total acumulado</p>
+                </div>
+
+                <div className="flex-1 p-4 rounded-xl border bg-surface border-slate-700">
+                    <div className="flex items-center gap-3 mb-2">
+                        <div className="bg-blue-500/20 p-2 rounded-lg text-blue-400"><TrendingUp size={20} /></div>
+                        <h3 className="font-medium text-slate-400 text-sm">Aportado en {year}</h3>
+                    </div>
+                    <p className="text-3xl font-bold text-blue-400">{yearContribution.toFixed(2)}€</p>
+                    <p className="text-xs text-slate-500 mt-1">Transferencias este año</p>
+                </div>
+            </div>
+
+            <div className="flex justify-between items-center">
+                <h2 className="text-lg font-bold text-slate-200">Historial de Movimientos</h2>
+                <button onClick={() => setIsAdding(!isAdding)} className="bg-amber-500 text-black px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2">
+                    {isAdding ? <X size={16} /> : <Plus size={16} />}
+                    {isAdding ? 'Cancelar' : 'Añadir Movimiento'}
+                </button>
+            </div>
+
+            {isAdding && (
+                <div className="bg-slate-900/50 p-4 rounded-xl border border-dashed border-slate-700 animate-in slide-in-from-top-4">
+                    <form onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                        <div><label className="text-xs text-slate-400">Fecha</label><input type="date" required value={date} onChange={e => setDate(e.target.value)} className="w-full bg-slate-800 border-slate-700 rounded-lg p-2 text-sm" /></div>
+                        <div><label className="text-xs text-slate-400">Concepto</label><input required value={concept} onChange={e => setConcept(e.target.value)} placeholder="Ej. Aportación mensual" className="w-full bg-slate-800 border-slate-700 rounded-lg p-2 text-sm" /></div>
+                        <div><label className="text-xs text-slate-400">Importe (€)</label><input type="number" step="0.01" required value={amount} onChange={e => setAmount(e.target.value)} className="w-full bg-slate-800 border-slate-700 rounded-lg p-2 text-sm" placeholder="Positivo o negativo" /></div>
+                        <button className="bg-emerald-500 text-white p-2 rounded-lg font-bold">Guardar</button>
+                    </form>
+                </div>
+            )}
+
+            <div className="bg-surface rounded-xl border border-slate-700 overflow-hidden">
+                <table className="w-full text-sm">
+                    <thead className="bg-slate-900 text-slate-400">
+                        <tr>
+                            <th className="p-3 text-left">Fecha</th>
+                            <th className="p-3 text-left">Concepto</th>
+                            <th className="p-3 text-right">Importe</th>
+                            <th className="p-3 w-10"></th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                        {transactions.map(item => (
+                            <tr key={item.id} className="hover:bg-slate-800/50">
+                                <td className="p-3">{format(new Date(item.date), 'dd MMM yyyy', { locale: es })}</td>
+                                <td className="p-3 font-medium text-slate-200">{item.concept}</td>
+                                <td className={`p-3 text-right font-bold ${item.amount >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                    {item.amount > 0 ? '+' : ''}{item.amount.toFixed(2)}€
+                                </td>
+                                <td className="p-3 text-right">
+                                    <button onClick={() => handleDelete(item.id)} className="text-slate-600 hover:text-red-400"><Trash2 size={16} /></button>
+                                </td>
+                            </tr>
+                        ))}
+                        {transactions.length === 0 && (
+                            <tr><td colSpan={4} className="p-8 text-center text-slate-500">No hay movimientos registrados.</td></tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+
         </div>
     )
 }
