@@ -344,13 +344,13 @@ export const StoreProvider = ({ children }) => {
     };
 
     // Expenses Actions
-    const addExpense = async (title, amount, category, payerId, splitAmong, splitMode = 'equal', customAmounts = {}) => {
+    const addExpense = async (title, amount, category, payerId, splitAmong, splitMode = 'equal', customAmounts = {}, date = null) => {
         if (!user || !household) return;
         await addDoc(collection(db, "expenses"), {
             title,
             amount: Number(amount),
             category,
-            date: new Date().toISOString(),
+            date: date || new Date().toISOString(),
             householdId: household.id,
             payerId: payerId || user.uid, // Who paid?
             splitAmong: splitAmong || householdMembers.map(m => m.id), // Who is is for? (Array of IDs)
@@ -427,6 +427,31 @@ export const StoreProvider = ({ children }) => {
         const currentCategories = household.expenseCategories || [];
         await updateDoc(doc(db, "households", household.id), {
             expenseCategories: currentCategories.filter(c => c.id !== categoryId)
+        });
+    };
+
+    const updateHouseStatsCategories = async (categoryIds) => {
+        if (!user || !household) return;
+        await updateDoc(doc(db, "households", household.id), {
+            houseStatsCategories: categoryIds
+        });
+    };
+
+    const updateHouseStatsPeriod = async (period) => {
+        if (!user || !household) return;
+        await updateDoc(doc(db, "households", household.id), {
+            houseStatsPeriod: period
+        });
+    };
+
+    const updateHouseStatsCategoryColor = async (categoryId, color) => {
+        if (!user || !household) return;
+        const currentColors = household.houseStatsCategoryColors || {};
+        await updateDoc(doc(db, "households", household.id), {
+            houseStatsCategoryColors: {
+                ...currentColors,
+                [categoryId]: color
+            }
         });
     };
 
@@ -519,7 +544,7 @@ export const StoreProvider = ({ children }) => {
             createHousehold, joinHousehold,
             meals, menu, expenses,
             addMeal, updateMealStock, updateMeal, deleteMeal, setMenuItem, addExpense, updateExpense, deleteExpense,
-            addExpenseCategory, deleteExpenseCategory,
+            addExpenseCategory, deleteExpenseCategory, updateHouseStatsCategories, updateHouseStatsPeriod, updateHouseStatsCategoryColor,
             // User Actions
             switchHousehold, leaveHousehold, removeMember,
             // Admin exports

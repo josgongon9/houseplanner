@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '../context/StoreContext';
-import { Plus, DollarSign, TrendingUp, Calendar, User, ArrowRightLeft, Check, X, ChevronLeft, ChevronRight, Lock, Unlock, Grid, PieChart as PieChartIcon, Trash, Edit, Divide, Percent } from 'lucide-react';
+import { Plus, ArrowLeft, DollarSign, TrendingUp, Calendar, User, ArrowRightLeft, Check, X, ChevronLeft, ChevronRight, Lock, Unlock, Grid, PieChart as PieChartIcon, Trash, Edit, Divide, Percent, Zap, Flame, Droplets, BarChart2, Home, Settings, Palette } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, subMonths, addMonths, isSameMonth, startOfYear, endOfYear, eachMonthOfInterval, isFuture, isPast, isThisMonth, addYears, subYears } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip as RechartsTooltip } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
 const DEFAULT_CATEGORIES = [
     { id: 'groceries', name: 'Supermercado', icon: '🛒', color: '#F97316' },
@@ -11,13 +11,16 @@ const DEFAULT_CATEGORIES = [
     { id: 'transport', name: 'Transporte', icon: '🚗', color: '#8B5CF6' },
     { id: 'home', name: 'Hogar', icon: '🏠', color: '#F59E0B' },
     { id: 'settlement', name: 'Liquidación', icon: '🤝', color: '#10B981' },
+    { id: 'GAS', name: 'Gas', icon: '🔥', color: '#EF4444' },
+    { id: 'AGUA', name: 'Agua', icon: '💧', color: '#3B82F6' },
+    { id: 'LUZ', name: 'Luz', icon: '⚡', color: '#F59E0B' },
     { id: 'other', name: 'Otro', icon: '📦', color: '#64748B' }
 ];
 
 export default function Expenses() {
-    const { expenses, addExpense, updateExpense, deleteExpense, householdMembers, user, household, addExpenseCategory, deleteExpenseCategory } = useStore();
+    const { expenses, addExpense, updateExpense, deleteExpense, householdMembers, user, household, addExpenseCategory, deleteExpenseCategory, updateHouseStatsCategories, updateHouseStatsPeriod, updateHouseStatsCategoryColor } = useStore();
     const [viewMode, setViewMode] = useState('month'); // 'month' | 'year'
-    const [activeTab, setActiveTab] = useState('expenses'); // 'expenses' | 'balances' | 'charts'
+    const [activeTab, setActiveTab] = useState('expenses'); // 'expenses' | 'balances' | 'charts' | 'house'
     const [currentMonth, setCurrentMonth] = useState(new Date());
 
     const categories = useMemo(() => {
@@ -28,6 +31,7 @@ export default function Expenses() {
     const [showAdd, setShowAdd] = useState(false);
     const [editingId, setEditingId] = useState(null); // ID of expense being edited
     const [showManageCategories, setShowManageCategories] = useState(false);
+    const [showHouseSettings, setShowHouseSettings] = useState(false);
 
     // Form State
     const [title, setTitle] = useState("");
@@ -82,14 +86,13 @@ export default function Expenses() {
         if (splitMode === 'custom') {
             const sum = Object.values(customAmounts).reduce((acc, curr) => acc + Number(curr), 0);
             if (Math.abs(sum - Number(amount)) > 0.05) {
-                // Should be handled by UI disable state, but double check
                 return;
             }
         }
 
         const data = {
             title,
-            amount,
+            amount: Number(amount),
             category,
             payerId,
             splitAmong: splitMode === 'equal' ? splitAmong : Object.keys(customAmounts).filter(k => Number(customAmounts[k]) > 0),
@@ -100,7 +103,14 @@ export default function Expenses() {
         if (editingId) {
             await updateExpense(editingId, data);
         } else {
-            await addExpense(data.title, data.amount, data.category, data.payerId, data.splitAmong, data.splitMode, data.customAmounts);
+            // Use currentMonth but preserve today's day/time if we are in the current month
+            let expenseDate = new Date().toISOString();
+            if (!isThisMonth(currentMonth)) {
+                // If we are in another month, use the 1st of that month at noon to avoid timezone issues
+                const targetDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1, 12, 0, 0);
+                expenseDate = targetDate.toISOString();
+            }
+            await addExpense(data.title, data.amount, data.category, data.payerId, data.splitAmong, data.splitMode, data.customAmounts, expenseDate);
         }
         setShowAdd(false);
         setEditingId(null);
@@ -135,7 +145,6 @@ export default function Expenses() {
 
     const sanitizeAmount = (val) => {
         if (!val) return "";
-        // If it has decimals, limit to 2
         if (val.includes('.')) {
             const parts = val.split('.');
             if (parts[1].length > 2) {
@@ -160,25 +169,23 @@ export default function Expenses() {
 
     // --- BALANCES LOGIC (Tricount Style) ---
     const balances = useMemo(() => {
-        const balanceMap = {}; // uid -> amount (positive = owed, negative = owes)
+        const balanceMap = {};
         householdMembers.forEach(m => balanceMap[m.id] = 0);
 
         monthlyExpenses.forEach(exp => {
             const cost = Number(exp.amount);
             const payer = exp.payerId;
-            const beneficiaries = exp.splitAmong || []; // UIDs involved
+            const beneficiaries = exp.splitAmong || [];
 
             if (!balanceMap.hasOwnProperty(payer)) balanceMap[payer] = 0;
             balanceMap[payer] += cost;
 
             if (exp.splitMode === 'custom' && exp.customAmounts) {
-                // Custom Split
                 Object.entries(exp.customAmounts).forEach(([uid, amt]) => {
                     if (!balanceMap.hasOwnProperty(uid)) balanceMap[uid] = 0;
                     balanceMap[uid] -= Number(amt);
                 });
             } else {
-                // Equal Split (Default)
                 if (beneficiaries.length === 0) return;
                 const splitAmount = cost / beneficiaries.length;
                 beneficiaries.forEach(uid => {
@@ -191,26 +198,23 @@ export default function Expenses() {
         return Object.entries(balanceMap)
             .map(([uid, amount]) => ({
                 uid,
-                amount: Math.round(amount * 100) / 100, // Round to cents
+                amount: Math.round(amount * 100) / 100,
                 member: householdMembers.find(m => m.id === uid) || { id: uid, displayName: 'Ex-miembro' }
             }))
             .sort((a, b) => b.amount - a.amount);
     }, [monthlyExpenses, householdMembers]);
 
-    // Calculate simple debts (Who pays whom)
     const transactions = useMemo(() => {
         let debtList = [];
-        // Clone and convert to discrete cents to avoid float hell
         let bals = balances.map(b => ({
             ...b,
             cents: Math.round(b.amount * 100)
         }));
 
-        // Sort: Creditors (positive) first, Debtors (negative) last
         bals.sort((a, b) => b.cents - a.cents);
 
-        let i = 0; // Creditor pointer
-        let j = bals.length - 1; // Debtor pointer
+        let i = 0;
+        let j = bals.length - 1;
 
         while (i < j) {
             let creditor = bals[i];
@@ -254,17 +258,16 @@ export default function Expenses() {
     const getMonthTotal = (monthDate) => {
         return expenses
             .filter(e => isSameMonth(parseISO(e.date), monthDate) && e.category !== 'settlement')
-            .reduce((acc, curr) => acc + curr.amount, 0);
+            .reduce((acc, curr) => acc + Number(curr.amount), 0);
     };
 
-    // Calculate total paid per person for the current month
     const individualPaid = useMemo(() => {
         const paidMap = {};
         householdMembers.forEach(m => paidMap[m.id] = 0);
 
         monthlyExpenses.forEach(exp => {
             if (exp.category === 'settlement') return;
-            paidMap[exp.payerId] = (paidMap[exp.payerId] || 0) + exp.amount;
+            paidMap[exp.payerId] = (paidMap[exp.payerId] || 0) + Number(exp.amount);
         });
 
         return Object.entries(paidMap).map(([uid, amount]) => ({
@@ -285,10 +288,8 @@ export default function Expenses() {
             }));
     }, [individualPaid]);
 
-    // --- CHART DATA ---
     const chartData = useMemo(() => {
         const data = {};
-        // Initialize all categories with 0 but only if they are not settlement
         categories.forEach(c => {
             if (c.id !== 'settlement') data[c.id] = 0;
         });
@@ -296,9 +297,9 @@ export default function Expenses() {
         monthlyExpenses.forEach(e => {
             if (e.category === 'settlement') return;
             if (data[e.category] !== undefined) {
-                data[e.category] += e.amount;
+                data[e.category] += Number(e.amount);
             } else {
-                data.other = (data.other || 0) + e.amount;
+                data.other = (data.other || 0) + Number(e.amount);
             }
         });
 
@@ -313,20 +314,114 @@ export default function Expenses() {
             .sort((a, b) => b.value - a.value);
     }, [monthlyExpenses, categories]);
 
+    const statsCategoryIds = useMemo(() => {
+        return household?.houseStatsCategories || ['LUZ', 'AGUA', 'GAS'];
+    }, [household]);
+
+    const statsCategories = useMemo(() => {
+        const customColors = household?.houseStatsCategoryColors || {};
+        return statsCategoryIds.map(id => {
+            const cat = categories.find(c => c.id === id);
+            if (!cat) return null;
+            return {
+                ...cat,
+                color: customColors[id] || cat.color
+            };
+        }).filter(Boolean);
+    }, [statsCategoryIds, categories, household?.houseStatsCategoryColors]);
+
+    const yearUtilityData = useMemo(() => {
+        let start, end;
+        if (household?.houseStatsPeriod?.mode === 'custom' && household.houseStatsPeriod.start && household.houseStatsPeriod.end) {
+            start = startOfMonth(parseISO(household.houseStatsPeriod.start));
+            end = endOfMonth(parseISO(household.houseStatsPeriod.end));
+        } else {
+            start = startOfYear(currentMonth);
+            end = endOfYear(currentMonth);
+        }
+
+        const monthsInInterval = eachMonthOfInterval({ start, end });
+
+        return monthsInInterval.map(m => {
+            const mExpenses = expenses.filter(e => isSameMonth(parseISO(e.date), m));
+            const monthData = {
+                name: format(m, 'MMM', { locale: es }).toUpperCase(),
+                selectedTotal: 0,
+                absoluteTotal: mExpenses
+                    .filter(e => e.category !== 'settlement')
+                    .reduce((acc, curr) => acc + Number(curr.amount), 0)
+            };
+
+            statsCategoryIds.forEach(catId => {
+                const amount = mExpenses.filter(e => e.category === catId).reduce((acc, curr) => acc + Number(curr.amount), 0);
+                monthData[catId] = amount;
+                monthData.selectedTotal += amount;
+            });
+
+            return monthData;
+        });
+    }, [expenses, currentMonth, statsCategoryIds, household?.houseStatsPeriod]);
+
+    const statsTitle = useMemo(() => {
+        if (household?.houseStatsPeriod?.mode === 'custom' && household.houseStatsPeriod.start && household.houseStatsPeriod.end) {
+            const start = parseISO(household.houseStatsPeriod.start);
+            const end = parseISO(household.houseStatsPeriod.end);
+            return `${format(start, 'MMM yy', { locale: es })} - ${format(end, 'MMM yy', { locale: es })}`;
+        }
+        return format(currentMonth, 'yyyy');
+    }, [household?.houseStatsPeriod, currentMonth]);
+
+    const yearlyUtilityTotals = useMemo(() => {
+        const totals = {};
+        statsCategoryIds.forEach(catId => {
+            totals[catId] = yearUtilityData.reduce((acc, curr) => acc + (curr[catId] || 0), 0);
+        });
+        return totals;
+    }, [yearUtilityData, statsCategoryIds]);
+
     return (
         <div className="p-4 space-y-4 pb-24">
 
             <header className="flex justify-between items-center mb-2">
                 <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-400 to-teal-600 bg-clip-text text-transparent">Gastos</h1>
                 <div className="flex gap-2">
+                    {activeTab === 'house' && (
+                        <button
+                            onClick={() => setActiveTab('expenses')}
+                            className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-all border border-slate-700 shadow-sm mr-2"
+                        >
+                            <ArrowLeft size={16} /> Volver
+                        </button>
+                    )}
                     <button
-                        onClick={() => setViewMode(viewMode === 'day' ? 'year' : viewMode === 'year' ? 'month' : 'year')}
-                        className={`p-2 rounded-full transition-colors ${viewMode === 'year' ? 'bg-emerald-500 text-white shadow' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+                        onClick={() => {
+                            if (activeTab === 'house') {
+                                setActiveTab('expenses');
+                            } else {
+                                setActiveTab('house');
+                                if (viewMode !== 'month') setViewMode('month');
+                            }
+                        }}
+                        className={`p-2 rounded-full transition-colors ${activeTab === 'house' && viewMode === 'month' ? 'bg-emerald-500 text-white shadow' : 'bg-surface border border-slate-700 text-slate-400 hover:text-white'}`}
+                        title="Estadísticas de la Casa"
+                    >
+                        <Home size={20} />
+                    </button>
+                    <button
+                        onClick={() => {
+                            if (activeTab === 'house') {
+                                setViewMode('year');
+                                setActiveTab('expenses');
+                            } else {
+                                setViewMode(viewMode === 'year' ? 'month' : 'year');
+                            }
+                        }}
+                        className={`p-2 rounded-full transition-colors ${viewMode === 'year' && activeTab !== 'house' ? 'bg-emerald-500 text-white shadow' : 'bg-surface border border-slate-700 text-slate-400 hover:text-white'}`}
                         title={viewMode === 'year' ? "Ver Mes" : "Ver Año"}
                     >
                         {viewMode === 'year' ? <Calendar size={20} /> : <Grid size={20} />}
                     </button>
-                    {!showAdd && viewMode === 'month' && (
+                    {!showAdd && viewMode === 'month' && activeTab !== 'house' && (
                         <button
                             onClick={handleOpenAdd}
                             className="bg-emerald-500 hover:bg-emerald-600 text-white p-2 rounded-full shadow-lg transition-transform active:scale-95"
@@ -338,44 +433,46 @@ export default function Expenses() {
             </header>
 
             {/* Navigation Header */}
-            <div className="flex items-center justify-between bg-surface p-2 rounded-xl border border-slate-700">
-                <button
-                    onClick={() => setCurrentMonth(viewMode === 'year' ? subYears(currentMonth, 1) : subMonths(currentMonth, 1))}
-                    className="p-2 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white"
-                >
-                    <ChevronLeft size={20} />
-                </button>
-                <div className="text-center flex flex-col items-center">
+            {activeTab !== 'house' && (
+                <div className="flex items-center justify-between bg-surface p-2 rounded-xl border border-slate-700">
                     <button
-                        onClick={() => setCurrentMonth(new Date())}
-                        className="font-bold capitalize text-lg hover:text-emerald-400 transition-colors flex items-center gap-2"
+                        onClick={() => setCurrentMonth(viewMode === 'year' ? subYears(currentMonth, 1) : subMonths(currentMonth, 1))}
+                        className="p-2 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white"
                     >
-                        {viewMode === 'year' ? format(currentMonth, 'yyyy') : format(currentMonth, 'MMMM yyyy', { locale: es })}
-                        {!isSameMonth(currentMonth, new Date()) && (
-                            <span className="bg-emerald-500/20 text-emerald-400 text-[10px] px-1.5 py-0.5 rounded-full border border-emerald-500/30">
-                                Hoy
-                            </span>
-                        )}
+                        <ChevronLeft size={20} />
                     </button>
-                    {viewMode === 'month' && (
-                        isSettled ? (
-                            <span className="text-[10px] text-green-400 font-bold bg-green-500/10 px-2 py-0.5 rounded-full border border-green-500/30 flex items-center gap-1 justify-center mx-auto w-max mt-1">
-                                <Lock size={10} /> CERRADO
-                            </span>
-                        ) : (
-                            <span className="text-[10px] text-slate-400 font-medium block mt-1">
-                                Total: {totalMonthly.toFixed(0)}€
-                            </span>
-                        )
-                    )}
+                    <div className="text-center flex flex-col items-center">
+                        <button
+                            onClick={() => setCurrentMonth(new Date())}
+                            className="font-bold capitalize text-lg hover:text-emerald-400 transition-colors flex items-center gap-2"
+                        >
+                            {viewMode === 'year' ? format(currentMonth, 'yyyy') : format(currentMonth, 'MMMM yyyy', { locale: es })}
+                            {!isSameMonth(currentMonth, new Date()) && (
+                                <span className="bg-emerald-500/20 text-emerald-400 text-[10px] px-1.5 py-0.5 rounded-full border border-emerald-500/30">
+                                    Hoy
+                                </span>
+                            )}
+                        </button>
+                        {viewMode === 'month' && (
+                            isSettled ? (
+                                <span className="text-[10px] text-green-400 font-bold bg-green-500/10 px-2 py-0.5 rounded-full border border-green-500/30 flex items-center gap-1 justify-center mx-auto w-max mt-1">
+                                    <Lock size={10} /> CERRADO
+                                </span>
+                            ) : (
+                                <span className="text-[10px] text-slate-400 font-medium block mt-1">
+                                    Total: {totalMonthly.toFixed(0)}€
+                                </span>
+                            )
+                        )}
+                    </div>
+                    <button
+                        onClick={() => setCurrentMonth(viewMode === 'year' ? addYears(currentMonth, 1) : addMonths(currentMonth, 1))}
+                        className="p-2 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white"
+                    >
+                        <ChevronRight size={20} />
+                    </button>
                 </div>
-                <button
-                    onClick={() => setCurrentMonth(viewMode === 'year' ? addYears(currentMonth, 1) : addMonths(currentMonth, 1))}
-                    className="p-2 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white"
-                >
-                    <ChevronRight size={20} />
-                </button>
-            </div>
+            )}
 
             {/* === YEAR OVERVIEW === */}
             {viewMode === 'year' && (
@@ -417,26 +514,28 @@ export default function Expenses() {
             {viewMode === 'month' && (
                 <>
                     {/* Tabs */}
-                    <div className="flex gap-2 p-1 bg-surface border border-slate-700 rounded-xl">
-                        <button
-                            onClick={() => setActiveTab('expenses')}
-                            className={`flex-1 py-1.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'expenses' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
-                        >
-                            Listado ({monthlyExpenses.length})
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('charts')}
-                            className={`flex-1 py-1.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'charts' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
-                        >
-                            Gráficos
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('balances')}
-                            className={`flex-1 py-1.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'balances' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
-                        >
-                            Saldos {transactions.length > 0 && <span className="ml-1 w-2 h-2 bg-red-500 rounded-full inline-block"></span>}
-                        </button>
-                    </div>
+                    {activeTab !== 'house' && (
+                        <div className="flex gap-2 p-1 bg-surface border border-slate-700 rounded-xl">
+                            <button
+                                onClick={() => setActiveTab('expenses')}
+                                className={`flex-1 py-1.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'expenses' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                            >
+                                Listado ({monthlyExpenses.length})
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('charts')}
+                                className={`flex-1 py-1.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'charts' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                            >
+                                Gráficos
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('balances')}
+                                className={`flex-1 py-1.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'balances' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                            >
+                                Saldos {transactions.length > 0 && <span className="ml-1 w-2 h-2 bg-red-500 rounded-full inline-block"></span>}
+                            </button>
+                        </div>
+                    )}
 
                     {/* --- ADD/EDIT EXPENSE MODAL --- */}
                     {showAdd && (
@@ -803,7 +902,6 @@ export default function Expenses() {
                                         <h3 className="font-bold text-lg text-slate-200 w-full mb-4 flex items-center gap-2">
                                             <User size={20} className="text-emerald-500" /> Gasto por Persona
                                         </h3>
-                                        {/* ... PieChart remains the same ... */}
                                         <div className="w-full h-64 mb-4">
                                             <ResponsiveContainer width="100%" height="100%">
                                                 <PieChart>
@@ -846,6 +944,228 @@ export default function Expenses() {
                                                     </div>
                                                 );
                                             })}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* === HOUSE STATISTICS VIEW === */}
+                    {activeTab === 'house' && (
+                        <div className="space-y-6 animate-in slide-in-from-right-4">
+                            <div className="bg-surface p-6 rounded-2xl border border-slate-700 space-y-6 shadow-xl relative">
+                                <div className="flex items-center justify-between gap-4 transition-all">
+                                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                                        <h2 className="text-xl font-bold text-slate-200 truncate sm:whitespace-normal">
+                                            Estadísticas de la Casa <span className="text-slate-500 font-medium font-mono text-sm">({statsTitle})</span>
+                                        </h2>
+                                        <div className="h-px flex-1 bg-slate-800 hidden md:block"></div>
+                                    </div>
+                                    <button
+                                        onClick={() => setShowHouseSettings(true)}
+                                        className="shrink-0 p-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-400 hover:text-white transition-all border border-slate-700 shadow-lg active:scale-95"
+                                        title="Configurar Categorías"
+                                    >
+                                        <Settings size={20} />
+                                    </button>
+                                </div>
+
+                                {statsCategories.length === 0 ? (
+                                    <div className="text-center py-10 opacity-50 space-y-4">
+                                        <div className="bg-slate-800 w-16 h-16 rounded-full flex items-center justify-center mx-auto text-slate-600">
+                                            <Settings size={32} />
+                                        </div>
+                                        <p className="text-sm">No has seleccionado categorías para visualizar.<br />Pulsa el icono de engranaje para configurar.</p>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                            {statsCategories.map(cat => (
+                                                <div key={cat.id} className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800 flex items-center gap-4">
+                                                    <div className="p-3 rounded-xl flex items-center justify-center text-2xl" style={{ backgroundColor: `${cat.color}20` }}>
+                                                        <span>{cat.icon}</span>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{cat.name}</p>
+                                                        <p className="text-xl font-black text-white">{(yearlyUtilityTotals[cat.id] || 0).toFixed(2)}€</p>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                            <div className="space-y-3">
+                                                <h3 className="text-sm font-bold text-slate-400 uppercase flex items-center gap-2">
+                                                    <BarChart2 size={16} /> Evolución por Categoría
+                                                </h3>
+                                                <div className="h-[400px] w-full bg-slate-900/30 p-3 rounded-xl border border-slate-800">
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <BarChart data={yearUtilityData} margin={{ top: 10, right: 5, left: -25, bottom: 5 }}>
+                                                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                                                            <XAxis dataKey="name" fontSize={11} axisLine={false} tickLine={false} />
+                                                            <YAxis fontSize={11} axisLine={false} tickLine={false} />
+                                                            <RechartsTooltip
+                                                                cursor={{ fill: '#334155', opacity: 0.4 }}
+                                                                formatter={(value) => [`${value.toFixed(2)}€`, '']}
+                                                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)' }}
+                                                            />
+                                                            <Legend
+                                                                verticalAlign="bottom"
+                                                                height={40}
+                                                                iconType="circle"
+                                                                wrapperStyle={{ paddingTop: '10px', fontSize: '10px', fontWeight: 'bold' }}
+                                                            />
+                                                            {statsCategories.map((cat, idx) => (
+                                                                <Bar
+                                                                    key={cat.id}
+                                                                    dataKey={cat.id}
+                                                                    name={cat.name}
+                                                                    fill={cat.color}
+                                                                    radius={[4, 4, 0, 0]}
+                                                                />
+                                                            ))}
+                                                        </BarChart>
+                                                    </ResponsiveContainer>
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-3">
+                                                <h3 className="text-sm font-bold text-slate-400 uppercase flex items-center gap-2">
+                                                    <TrendingUp size={16} /> Gasto Total (Periodo)
+                                                </h3>
+                                                <div className="h-[400px] w-full bg-slate-900/30 p-3 rounded-xl border border-slate-800">
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <BarChart data={yearUtilityData}>
+                                                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                                                            <XAxis dataKey="name" fontSize={10} axisLine={false} tickLine={false} />
+                                                            <YAxis fontSize={10} axisLine={false} tickLine={false} />
+                                                            <RechartsTooltip
+                                                                cursor={{ fill: '#334155', opacity: 0.4 }}
+                                                                formatter={(value) => [`${value.toFixed(2)}€`, '']}
+                                                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px' }}
+                                                            />
+                                                            <Bar dataKey="absoluteTotal" name="Gasto Real Mensual" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                                                        </BarChart>
+                                                    </ResponsiveContainer>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+
+                            {/* HOUSE SETTINGS MODAL */}
+                            {showHouseSettings && (
+                                <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                                    <div className="bg-surface w-full max-w-md rounded-2xl flex flex-col shadow-2xl animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+                                        <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900/50 rounded-t-2xl sticky top-0 z-10">
+                                            <h3 className="font-bold text-lg text-emerald-400">Configurar Estadísticas</h3>
+                                            <button onClick={() => setShowHouseSettings(false)} className="p-2 bg-slate-800 rounded-full"><X size={20} /></button>
+                                        </div>
+
+                                        <div className="p-6 space-y-8">
+                                            {/* Period Selection */}
+                                            <div className="space-y-4">
+                                                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                                    <Calendar size={14} /> Periodo de Visualización
+                                                </h4>
+                                                <div className="bg-slate-900 p-1 rounded-xl flex">
+                                                    <button
+                                                        onClick={() => updateHouseStatsPeriod({ mode: 'calendar' })}
+                                                        className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${household?.houseStatsPeriod?.mode !== 'custom' ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-white'}`}
+                                                    >
+                                                        Año Natural
+                                                    </button>
+                                                    <button
+                                                        onClick={() => updateHouseStatsPeriod({
+                                                            mode: 'custom',
+                                                            start: household?.houseStatsPeriod?.start || format(startOfYear(new Date()), 'yyyy-MM'),
+                                                            end: household?.houseStatsPeriod?.end || format(endOfYear(new Date()), 'yyyy-MM')
+                                                        })}
+                                                        className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${household?.houseStatsPeriod?.mode === 'custom' ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-white'}`}
+                                                    >
+                                                        Rango Personalizado
+                                                    </button>
+                                                </div>
+
+                                                {household?.houseStatsPeriod?.mode === 'custom' && (
+                                                    <div className="grid grid-cols-2 gap-3 animate-in fade-in slide-in-from-top-2">
+                                                        <div className="space-y-1">
+                                                            <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Desde</label>
+                                                            <input
+                                                                type="month"
+                                                                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs outline-none focus:border-emerald-500"
+                                                                value={household?.houseStatsPeriod?.start || ''}
+                                                                onChange={(e) => updateHouseStatsPeriod({ ...household.houseStatsPeriod, start: e.target.value })}
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Hasta</label>
+                                                            <input
+                                                                type="month"
+                                                                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs outline-none focus:border-emerald-500"
+                                                                value={household?.houseStatsPeriod?.end || ''}
+                                                                onChange={(e) => updateHouseStatsPeriod({ ...household.houseStatsPeriod, end: e.target.value })}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Categories Selection */}
+                                            <div className="space-y-4">
+                                                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                                    <Grid size={14} /> Categorías Incluidas
+                                                </h4>
+                                                <div className="space-y-2">
+                                                    {categories.filter(c => c.id !== 'settlement').map(cat => {
+                                                        const isChecked = statsCategoryIds.includes(cat.id);
+                                                        const customColor = household?.houseStatsCategoryColors?.[cat.id] || cat.color;
+                                                        return (
+                                                            <div key={cat.id} className="flex items-center gap-2">
+                                                                <button
+                                                                    onClick={() => {
+                                                                        const newList = isChecked
+                                                                            ? statsCategoryIds.filter(id => id !== cat.id)
+                                                                            : [...statsCategoryIds, cat.id];
+                                                                        updateHouseStatsCategories(newList);
+                                                                    }}
+                                                                    className={`flex-1 flex items-center gap-2 p-3 rounded-xl border transition-all ${isChecked
+                                                                            ? 'bg-emerald-500/10 border-emerald-500/50 text-white'
+                                                                            : 'bg-slate-900 border-slate-800 text-slate-500 grayscale'
+                                                                        }`}
+                                                                >
+                                                                    <span className="text-xl">{cat.icon}</span>
+                                                                    <span className="text-sm font-medium truncate">{cat.name}</span>
+                                                                    {isChecked && <Check size={14} className="ml-auto text-emerald-500" />}
+                                                                </button>
+                                                                {isChecked && (
+                                                                    <div className="relative group">
+                                                                        <input
+                                                                            type="color"
+                                                                            value={customColor}
+                                                                            onChange={(e) => updateHouseStatsCategoryColor(cat.id, e.target.value)}
+                                                                            className="w-10 h-10 rounded-lg cursor-pointer border-2 border-slate-700 hover:border-emerald-500 transition-colors"
+                                                                            title="Cambiar color"
+                                                                        />
+                                                                        <Palette size={12} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="p-4 bg-slate-900/50 rounded-b-2xl sticky bottom-0 border-t border-slate-700">
+                                            <button
+                                                onClick={() => setShowHouseSettings(false)}
+                                                className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 rounded-xl transition-colors shadow-lg shadow-emerald-500/20"
+                                            >
+                                                Confirmar Cambios
+                                            </button>
                                         </div>
                                     </div>
                                 </div>

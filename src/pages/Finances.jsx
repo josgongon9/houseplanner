@@ -3,8 +3,9 @@ import { useStore } from '../context/StoreContext';
 import { db, doc, getDoc, setDoc, onSnapshot, updateDoc, collection, addDoc, query, where, orderBy, getDocs, deleteDoc, runTransaction } from '../lib/firebase';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { TrendingUp, PieChart as PieIcon, ArrowUpCircle, ArrowDownCircle, DollarSign, Plus, Trash2, Edit2, Save, X, ChevronLeft, ChevronRight, BarChart2, Settings, Wallet } from 'lucide-react';
+import { TrendingUp, PieChart as PieIcon, ArrowUpCircle, ArrowDownCircle, DollarSign, Plus, Trash2, Edit2, Save, X, ChevronLeft, ChevronRight, Settings, Wallet, ArrowUp, ArrowDown, Calendar as CalendarIcon, CheckCircle2, AlertCircle } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
+import { differenceInDays, eachMonthOfInterval, startOfMonth as startOfM, endOfMonth as endOfM, isWithinInterval, getDaysInMonth } from 'date-fns';
 
 export default function Finances() {
     const { user } = useStore();
@@ -207,6 +208,22 @@ export default function Finances() {
         await setDoc(doc(db, 'users', user.uid, 'finance_years', String(year)), newData, { merge: true });
     };
 
+    // Reorder Category
+    const handleReorderCategory = async (type, index, direction) => {
+        const field = type === 'income' ? 'incomeCategories' : 'expenseCategories';
+        const categories = [...(financeData[field] || [])];
+        const newIndex = direction === 'up' ? index - 1 : index + 1;
+
+        if (newIndex < 0 || newIndex >= categories.length) return;
+
+        // Swap
+        [categories[index], categories[newIndex]] = [categories[newIndex], categories[index]];
+
+        const newData = { ...financeData, [field]: categories };
+        setFinanceData(newData);
+        await setDoc(doc(db, 'users', user.uid, 'finance_years', String(year)), newData, { merge: true });
+    };
+
     return (
         <div className="p-4 pb-24 space-y-6 animate-in fade-in relative">
             {/* HEADER */}
@@ -319,6 +336,7 @@ export default function Finances() {
                                     onAdd={(name) => handleAddCategory('income', name)}
                                     onRename={(old, newName) => handleRenameCategory('income', old, newName)}
                                     onDelete={(name) => handleDeleteCategory('income', name)}
+                                    onReorder={(idx, dir) => handleReorderCategory('income', idx, dir)}
                                     colorClass="text-emerald-300"
                                 />
                             </div>
@@ -333,6 +351,7 @@ export default function Finances() {
                                     onAdd={(name) => handleAddCategory('expense', name)}
                                     onRename={(old, newName) => handleRenameCategory('expense', old, newName)}
                                     onDelete={(name) => handleDeleteCategory('expense', name)}
+                                    onReorder={(idx, dir) => handleReorderCategory('expense', idx, dir)}
                                     colorClass="text-red-300"
                                 />
                             </div>
@@ -342,9 +361,11 @@ export default function Finances() {
             )}
         </div>
     );
-}
+};
 
-const CategoryList = ({ items, onAdd, onRename, onDelete, colorClass }) => {
+// --- SUBCOMPONENTS ---
+
+const CategoryList = ({ items, onAdd, onRename, onDelete, onReorder, colorClass }) => {
     const [newName, setNewName] = useState("");
     const [editing, setEditing] = useState(null); // name being edited
     const [editVal, setEditVal] = useState("");
@@ -365,6 +386,8 @@ const CategoryList = ({ items, onAdd, onRename, onDelete, colorClass }) => {
         setEditing(null);
     }
 
+    const autoCategories = ['Acciones', 'Dividendos'];
+
     return (
         <div className="space-y-3">
             <form onSubmit={handleAdd} className="flex gap-2 mb-4">
@@ -380,36 +403,58 @@ const CategoryList = ({ items, onAdd, onRename, onDelete, colorClass }) => {
             </form>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {items.map(item => (
-                    <div key={item} className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 border border-slate-800 group hover:border-slate-600 transition-colors">
-                        {editing === item ? (
-                            <div className="flex items-center gap-2 w-full">
-                                <input
-                                    value={editVal}
-                                    onChange={e => setEditVal(e.target.value)}
-                                    className="flex-1 bg-black/20 rounded p-1 text-sm outline-none"
-                                    autoFocus
-                                />
-                                <button onClick={() => saveEdit(item)} className="text-green-400"><Save size={16} /></button>
-                                <button onClick={() => setEditing(null)} className="text-slate-500"><X size={16} /></button>
-                            </div>
-                        ) : (
-                            <>
-                                <span className={`font-medium text-sm ${colorClass}`}>{item}</span>
-                                <div className="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button onClick={() => startEdit(item)} className="p-1.5 text-slate-500 hover:text-white rounded hover:bg-slate-700"><Edit2 size={14} /></button>
-                                    <button onClick={() => onDelete(item)} className="p-1.5 text-slate-500 hover:text-red-400 rounded hover:bg-slate-700"><Trash2 size={14} /></button>
+                {items.map((item, idx) => {
+                    const isLocked = autoCategories.includes(item);
+                    return (
+                        <div key={item} className={`flex items-center justify-between p-3 rounded-lg border group hover:border-slate-600 transition-colors ${isLocked ? 'bg-slate-800/20 border-slate-800/50' : 'bg-slate-900/50 border-slate-800'}`}>
+                            {editing === item ? (
+                                <div className="flex items-center gap-2 w-full">
+                                    <input
+                                        value={editVal}
+                                        onChange={e => setEditVal(e.target.value)}
+                                        className="flex-1 bg-black/20 rounded p-1 text-sm outline-none"
+                                        autoFocus
+                                    />
+                                    <button onClick={() => saveEdit(item)} className="text-green-400"><Save size={16} /></button>
+                                    <button onClick={() => setEditing(null)} className="text-slate-500"><X size={16} /></button>
                                 </div>
-                            </>
-                        )}
-                    </div>
-                ))}
+                            ) : (
+                                <>
+                                    <div className="flex items-center gap-2 flex-1">
+                                        <div className={`flex flex-col gap-0.5 transition-opacity ${isLocked ? 'opacity-20 cursor-not-allowed' : 'opacity-0 group-hover:opacity-100'}`}>
+                                            <button
+                                                onClick={() => !isLocked && onReorder(idx, 'up')}
+                                                disabled={isLocked || idx === 0}
+                                                className="text-slate-600 hover:text-amber-500 disabled:opacity-0"
+                                            >
+                                                <ArrowUp size={12} />
+                                            </button>
+                                            <button
+                                                onClick={() => !isLocked && onReorder(idx, 'down')}
+                                                disabled={isLocked || idx === items.length - 1}
+                                                className="text-slate-600 hover:text-amber-500 disabled:opacity-0"
+                                            >
+                                                <ArrowDown size={12} />
+                                            </button>
+                                        </div>
+                                        <span className={`font-medium text-sm flex items-center gap-2 ${colorClass}`}>
+                                            {item}
+                                            {isLocked && <span className="text-[10px] text-slate-500 font-bold bg-slate-800 px-1 rounded flex items-center gap-1 opacity-60">AUTO</span>}
+                                        </span>
+                                    </div>
+                                    <div className={`flex items-center gap-1 transition-opacity ${isLocked ? 'opacity-0' : 'opacity-100 sm:opacity-0 group-hover:opacity-100'}`}>
+                                        <button onClick={() => !isLocked && startEdit(item)} className="p-1.5 text-slate-500 hover:text-white rounded hover:bg-slate-700" disabled={isLocked}><Edit2 size={14} /></button>
+                                        <button onClick={() => !isLocked && onDelete(item)} className="p-1.5 text-slate-500 hover:text-red-400 rounded hover:bg-slate-700" disabled={isLocked}><Trash2 size={14} /></button>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    );
+                })}
             </div>
         </div>
-    )
-}
-
-// --- SUBCOMPONENTS ---
+    );
+};
 
 const BudgetView = ({ year, data, onUpdate, pieData, totals }) => {
     const months = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
@@ -425,45 +470,45 @@ const BudgetView = ({ year, data, onUpdate, pieData, totals }) => {
     return (
         <div className="space-y-8">
             {/* 1. Yearly Summary Table */}
-            <div className="bg-surface rounded-2xl border border-slate-700 overflow-hidden">
-                <table className="w-full text-sm">
+            <div className="bg-surface rounded-2xl border border-slate-700 overflow-x-auto">
+                <table className="w-full text-sm whitespace-nowrap">
                     <thead className="bg-slate-900 text-slate-400">
                         <tr>
-                            <th className="p-3 text-left">Resumen Anual</th>
-                            {months.map(m => <th key={m} className="p-2 text-center text-xs">{m}</th>)}
-                            <th className="p-3 text-right bg-slate-800 text-white">TOTAL</th>
+                            <th className="p-3 text-left sticky left-0 bg-slate-900 z-10 border-r border-slate-700 min-w-[180px]">Resumen Anual</th>
+                            {months.map(m => <th key={m} className="p-2 text-center text-xs w-32 min-w-[100px]">{m}</th>)}
+                            <th className="p-3 text-right bg-slate-800 text-white shadow-[-4px_0_10px_rgba(0,0,0,0.3)] min-w-[120px]">TOTAL</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
                         <tr className="bg-emerald-900/10">
-                            <td className="p-3 font-bold text-emerald-400">Ingresos</td>
+                            <td className="p-3 font-bold text-emerald-400 sticky left-0 bg-surface border-r border-slate-700 z-10">Ingresos</td>
                             {months.map((_, i) => (
-                                <td key={i} className="p-2 text-center text-emerald-400/80">
-                                    {getMonthTotals(i).inc > 0 ? getMonthTotals(i).inc.toFixed(0) : '-'}
+                                <td key={i} className="p-2 text-center text-emerald-400/80 min-w-[100px]">
+                                    {getMonthTotals(i).inc > 0 ? getMonthTotals(i).inc.toFixed(2) : '-'}
                                 </td>
                             ))}
-                            <td className="p-3 text-right font-bold text-emerald-400">{totals.income.toFixed(2)}€</td>
+                            <td className="p-3 text-right font-bold text-emerald-400 bg-emerald-900/20 shadow-[-4px_0_10px_rgba(0,0,0,0.1)]">{totals.income.toFixed(2)}€</td>
                         </tr>
                         <tr className="bg-red-900/10">
-                            <td className="p-3 font-bold text-red-400">Gastos</td>
+                            <td className="p-3 font-bold text-red-400 sticky left-0 bg-surface border-r border-slate-700 z-10">Gastos</td>
                             {months.map((_, i) => (
-                                <td key={i} className="p-2 text-center text-red-400/80">
-                                    {getMonthTotals(i).exp > 0 ? getMonthTotals(i).exp.toFixed(0) : '-'}
+                                <td key={i} className="p-2 text-center text-red-400/80 min-w-[100px]">
+                                    {getMonthTotals(i).exp > 0 ? getMonthTotals(i).exp.toFixed(2) : '-'}
                                 </td>
                             ))}
-                            <td className="p-3 text-right font-bold text-red-400">{totals.expense.toFixed(2)}€</td>
+                            <td className="p-3 text-right font-bold text-red-400 bg-red-900/20 shadow-[-4px_0_10px_rgba(0,0,0,0.1)]">{totals.expense.toFixed(2)}€</td>
                         </tr>
                         <tr className="bg-slate-800 font-bold">
-                            <td className="p-3 text-slate-200">Ahorro</td>
+                            <td className="p-3 text-slate-200 sticky left-0 bg-slate-800 border-r border-slate-700 z-10">Ahorro</td>
                             {months.map((_, i) => {
                                 const sav = getMonthTotals(i).save;
                                 return (
-                                    <td key={i} className={`p-2 text-center ${sav >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
-                                        {sav !== 0 ? sav.toFixed(0) : '-'}
+                                    <td key={i} className={`p-2 text-center min-w-[100px] ${sav >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
+                                        {sav !== 0 ? sav.toFixed(2) : '-'}
                                     </td>
                                 )
                             })}
-                            <td className="p-3 text-right text-blue-400">{totals.savings.toFixed(2)}€</td>
+                            <td className="p-3 text-right text-blue-400 bg-slate-700/50 shadow-[-4px_0_10px_rgba(0,0,0,0.1)]">{totals.savings.toFixed(2)}€</td>
                         </tr>
                     </tbody>
                 </table>
@@ -479,15 +524,15 @@ const BudgetView = ({ year, data, onUpdate, pieData, totals }) => {
                 <table className="w-full text-sm whitespace-nowrap">
                     <thead className="bg-slate-900/50 text-slate-400">
                         <tr>
-                            <th className="p-3 text-left w-48 sticky left-0 bg-slate-900 z-10 border-r border-slate-700">Categoría</th>
-                            {months.map(m => <th key={m} className="p-2 text-center w-24">{m}</th>)}
-                            <th className="p-3 text-right bg-slate-900">Total</th>
+                            <th className="p-3 text-left w-56 min-w-[200px] sticky left-0 bg-slate-900 z-10 border-r border-slate-700">Categoría</th>
+                            {months.map(m => <th key={m} className="p-2 text-center w-32 min-w-[100px]">{m}</th>)}
+                            <th className="p-3 text-right bg-slate-900 min-w-[120px]">Total</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
                         {data?.incomeCategories?.map(cat => {
                             let rowTotal = 0;
-                            const isLocked = cat === 'Acciones' || cat === 'Dividendos';
+                            const isLocked = ['Acciones', 'Dividendos'].includes(cat);
                             return (
                                 <tr key={cat} className="hover:bg-slate-800/30">
                                     <td className="p-3 font-medium sticky left-0 bg-surface border-r border-slate-700">
@@ -498,9 +543,10 @@ const BudgetView = ({ year, data, onUpdate, pieData, totals }) => {
                                         const val = data?.monthly?.[i]?.incomes?.[cat] || 0;
                                         rowTotal += Number(val);
                                         return (
-                                            <td key={i} className="p-0">
+                                            <td key={i} className="p-0 min-w-[120px]">
                                                 <input
                                                     type="number"
+                                                    step="0.01"
                                                     disabled={isLocked}
                                                     className={`w-full h-full bg-transparent text-center p-2 outline-none transition-colors ${isLocked ? 'text-slate-500 cursor-not-allowed' : 'focus:bg-slate-800 text-slate-300'}`}
                                                     value={val || ''}
@@ -526,9 +572,9 @@ const BudgetView = ({ year, data, onUpdate, pieData, totals }) => {
                 <table className="w-full text-sm whitespace-nowrap">
                     <thead className="bg-slate-900/50 text-slate-400">
                         <tr>
-                            <th className="p-3 text-left w-48 sticky left-0 bg-slate-900 z-10 border-r border-slate-700">Categoría</th>
-                            {months.map(m => <th key={m} className="p-2 text-center w-24">{m}</th>)}
-                            <th className="p-3 text-right bg-slate-900">Total</th>
+                            <th className="p-3 text-left w-56 min-w-[200px] sticky left-0 bg-slate-900 z-10 border-r border-slate-700">Categoría</th>
+                            {months.map(m => <th key={m} className="p-2 text-center w-32 min-w-[100px]">{m}</th>)}
+                            <th className="p-3 text-right bg-slate-900 min-w-[120px]">Total</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
@@ -541,10 +587,11 @@ const BudgetView = ({ year, data, onUpdate, pieData, totals }) => {
                                         const val = data?.monthly?.[i]?.expenses?.[cat] || 0;
                                         rowTotal += Number(val);
                                         return (
-                                            <td key={i} className="p-0">
+                                            <td key={i} className="p-0 min-w-[120px]">
                                                 <input
                                                     type="number"
-                                                    className="w-full h-full bg-transparent text-center p-2 outline-none focus:bg-slate-800 transition-colors text-slate-300"
+                                                    step="0.01"
+                                                    className={`w-full h-full bg-transparent text-center p-2 outline-none focus:bg-slate-800 transition-colors text-slate-300`}
                                                     value={val || ''}
                                                     placeholder="-"
                                                     onChange={(e) => onUpdate(i, 'expense', cat, e.target.value)}
@@ -560,7 +607,9 @@ const BudgetView = ({ year, data, onUpdate, pieData, totals }) => {
                 </table>
             </div>
 
-            {/* Chart (Moved Bottom) */}
+
+
+            {/* General Pie Chart */}
             <div className="bg-surface p-4 rounded-2xl border border-slate-700 flex flex-col items-center justify-center min-h-[300px]">
                 <h3 className="text-lg font-bold mb-4">Presupuesto Anual</h3>
                 <ResponsiveContainer width="100%" height={250}>
@@ -591,8 +640,8 @@ const BudgetView = ({ year, data, onUpdate, pieData, totals }) => {
                 </div>
             </div>
         </div>
-    )
-}
+    );
+};
 
 const InvestmentsView = ({ year, stocks, dividends, userId }) => {
     const [invTab, setInvTab] = useState('stocks'); // 'stocks' | 'dividends'
