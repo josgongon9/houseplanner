@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '../context/StoreContext';
-import { Plus, ArrowLeft, DollarSign, TrendingUp, Calendar, User, ArrowRightLeft, Check, X, ChevronLeft, ChevronRight, Lock, Unlock, Grid, PieChart as PieChartIcon, Trash, Edit, Divide, Percent, Zap, Flame, Droplets, BarChart2, Home, Settings, Palette } from 'lucide-react';
+import { Plus, ArrowLeft, DollarSign, TrendingUp, Calendar, User, ArrowRightLeft, Check, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Lock, Unlock, Grid, PieChart as PieChartIcon, Trash, Edit, Divide, Percent, Zap, Flame, Droplets, BarChart2, Home, Settings, Palette, GripVertical } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, subMonths, addMonths, isSameMonth, startOfYear, endOfYear, eachMonthOfInterval, isFuture, isPast, isThisMonth, addYears, subYears } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
@@ -18,19 +18,23 @@ const DEFAULT_CATEGORIES = [
 ];
 
 export default function Expenses() {
-    const { expenses, addExpense, updateExpense, deleteExpense, householdMembers, user, household, addExpenseCategory, deleteExpenseCategory, updateHouseStatsCategories, updateHouseStatsPeriod, updateHouseStatsCategoryColor } = useStore();
+    const { expenses, addExpense, updateExpense, deleteExpense, householdMembers, user, household, addExpenseCategory, deleteExpenseCategory, updateAllExpenseCategories, updateHouseStatsCategories, updateHouseStatsPeriod, updateHouseStatsCategoryColor } = useStore();
     const [viewMode, setViewMode] = useState('month'); // 'month' | 'year'
     const [activeTab, setActiveTab] = useState('expenses'); // 'expenses' | 'balances' | 'charts' | 'house'
     const [currentMonth, setCurrentMonth] = useState(new Date());
 
+    // Use stored categories if available, otherwise use defaults
     const categories = useMemo(() => {
-        return [...DEFAULT_CATEGORIES, ...(household?.expenseCategories || [])];
+        const storedCategories = household?.expenseCategories;
+        if (storedCategories && storedCategories.length > 0) {
+            return storedCategories;
+        }
+        return DEFAULT_CATEGORIES;
     }, [household]);
 
     // Modal State
     const [showAdd, setShowAdd] = useState(false);
     const [editingId, setEditingId] = useState(null); // ID of expense being edited
-    const [showManageCategories, setShowManageCategories] = useState(false);
     const [showHouseSettings, setShowHouseSettings] = useState(false);
 
     // Form State
@@ -45,6 +49,9 @@ export default function Expenses() {
     // New Category State
     const [newCatName, setNewCatName] = useState("");
     const [newCatIcon, setNewCatIcon] = useState("📦");
+    const [editingCategoryId, setEditingCategoryId] = useState(null);
+    const [editCatName, setEditCatName] = useState("");
+    const [editCatIcon, setEditCatIcon] = useState("");
 
     // Filter expenses by selected month
     const monthlyExpenses = useMemo(() => {
@@ -262,15 +269,32 @@ export default function Expenses() {
     };
 
     const individualPaid = useMemo(() => {
-        const paidMap = {};
-        householdMembers.forEach(m => paidMap[m.id] = 0);
+        const expenseMap = {};
+        householdMembers.forEach(m => expenseMap[m.id] = 0);
 
         monthlyExpenses.forEach(exp => {
             if (exp.category === 'settlement') return;
-            paidMap[exp.payerId] = (paidMap[exp.payerId] || 0) + Number(exp.amount);
+
+            const splitAmong = exp.splitAmong || [];
+            const splitMode = exp.splitMode || 'equal';
+            const customAmounts = exp.customAmounts || {};
+            const amount = Number(exp.amount);
+
+            if (splitMode === 'custom') {
+                // Use custom amounts
+                Object.entries(customAmounts).forEach(([uid, amt]) => {
+                    expenseMap[uid] = (expenseMap[uid] || 0) + Number(amt);
+                });
+            } else {
+                // Equal split among participants
+                const perPerson = splitAmong.length > 0 ? amount / splitAmong.length : 0;
+                splitAmong.forEach(uid => {
+                    expenseMap[uid] = (expenseMap[uid] || 0) + perPerson;
+                });
+            }
         });
 
-        return Object.entries(paidMap).map(([uid, amount]) => ({
+        return Object.entries(expenseMap).map(([uid, amount]) => ({
             uid,
             amount,
             member: householdMembers.find(m => m.id === uid)
@@ -572,76 +596,19 @@ export default function Expenses() {
 
                                     {/* Category */}
                                     <div>
-                                        <div className="flex justify-between items-center mb-1">
-                                            <label className="block text-xs font-medium text-slate-400">Categoría *</label>
-                                            <button
-                                                type="button"
-                                                onClick={() => setShowManageCategories(!showManageCategories)}
-                                                className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider hover:underline"
-                                            >
-                                                {showManageCategories ? 'Cerrar Gestión' : 'Gestionar Categorías'}
-                                            </button>
-                                        </div>
-
-                                        {showManageCategories ? (
-                                            <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 space-y-3 animate-in fade-in zoom-in-95 duration-200">
-                                                <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
-                                                    {household?.expenseCategories?.map(cat => (
-                                                        <div key={cat.id} className="flex items-center justify-between bg-surface p-2 rounded-lg border border-slate-800">
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="text-lg">{cat.icon}</span>
-                                                                <span className="text-sm font-medium">{cat.name}</span>
-                                                            </div>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => deleteExpenseCategory(cat.id)}
-                                                                className="p-1.5 text-slate-500 hover:text-red-400 transition-colors"
-                                                            >
-                                                                <Trash size={14} />
-                                                            </button>
-                                                        </div>
-                                                    ))}
-                                                </div>
-
-                                                <div className="flex gap-2 pt-2 border-t border-slate-800">
-                                                    <input
-                                                        className="w-10 bg-slate-800 border border-slate-700 rounded-lg p-2 text-center outline-none focus:border-emerald-500 text-lg"
-                                                        value={newCatIcon} onChange={e => setNewCatIcon(e.target.value)}
-                                                        placeholder="📦"
-                                                    />
-                                                    <input
-                                                        className="flex-1 bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm outline-none focus:border-emerald-500"
-                                                        value={newCatName} onChange={e => setNewCatName(e.target.value)}
-                                                        placeholder="Nueva categoría..."
-                                                    />
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            if (newCatName.trim()) {
-                                                                addExpenseCategory(newCatName, newCatIcon);
-                                                                setNewCatName("");
-                                                            }
-                                                        }}
-                                                        className="bg-emerald-500 text-white px-3 rounded-lg font-bold text-xs"
-                                                    >
-                                                        Añadir
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <select
-                                                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none"
-                                                value={category} onChange={e => setCategory(e.target.value)}
-                                                required
-                                            >
-                                                <option value="" disabled>Selecciona una categoría</option>
-                                                {categories.map(cat => (
-                                                    <option key={cat.id} value={cat.id}>
-                                                        {cat.icon} {cat.name}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        )}
+                                        <label className="block text-xs font-medium text-slate-400 mb-1">Categoría *</label>
+                                        <select
+                                            className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-emerald-500 font-medium transition-colors cursor-pointer"
+                                            value={category} onChange={e => setCategory(e.target.value)}
+                                            required
+                                        >
+                                            <option value="" disabled>Selecciona una categoría</option>
+                                            {categories.map(cat => (
+                                                <option key={cat.id} value={cat.id}>
+                                                    {cat.icon} {cat.name}
+                                                </option>
+                                            ))}
+                                        </select>
                                     </div>
 
                                     {/* Payer */}
@@ -1113,48 +1080,211 @@ export default function Expenses() {
                                                 )}
                                             </div>
 
-                                            {/* Categories Selection */}
+                                            {/* Categories Selection & Management */}
                                             <div className="space-y-4">
                                                 <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                                                    <Grid size={14} /> Categorías Incluidas
+                                                    <Grid size={14} /> Gestión de Categorías
                                                 </h4>
-                                                <div className="space-y-2">
-                                                    {categories.filter(c => c.id !== 'settlement').map(cat => {
+
+                                                <div className="space-y-3">
+                                                    {categories.filter(c => c.id !== 'settlement').map((cat, index) => {
                                                         const isChecked = statsCategoryIds.includes(cat.id);
                                                         const customColor = household?.houseStatsCategoryColors?.[cat.id] || cat.color;
+
                                                         return (
-                                                            <div key={cat.id} className="flex items-center gap-2">
-                                                                <button
-                                                                    onClick={() => {
-                                                                        const newList = isChecked
-                                                                            ? statsCategoryIds.filter(id => id !== cat.id)
-                                                                            : [...statsCategoryIds, cat.id];
-                                                                        updateHouseStatsCategories(newList);
-                                                                    }}
-                                                                    className={`flex-1 flex items-center gap-2 p-3 rounded-xl border transition-all ${isChecked
-                                                                            ? 'bg-emerald-500/10 border-emerald-500/50 text-white'
-                                                                            : 'bg-slate-900 border-slate-800 text-slate-500 grayscale'
-                                                                        }`}
-                                                                >
-                                                                    <span className="text-xl">{cat.icon}</span>
-                                                                    <span className="text-sm font-medium truncate">{cat.name}</span>
-                                                                    {isChecked && <Check size={14} className="ml-auto text-emerald-500" />}
-                                                                </button>
-                                                                {isChecked && (
-                                                                    <div className="relative group">
-                                                                        <input
-                                                                            type="color"
-                                                                            value={customColor}
-                                                                            onChange={(e) => updateHouseStatsCategoryColor(cat.id, e.target.value)}
-                                                                            className="w-10 h-10 rounded-lg cursor-pointer border-2 border-slate-700 hover:border-emerald-500 transition-colors"
-                                                                            title="Cambiar color"
-                                                                        />
-                                                                        <Palette size={12} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-                                                                    </div>
-                                                                )}
+                                                            <div key={cat.id} className="bg-slate-900/50 rounded-2xl border border-slate-800 p-3 space-y-3 group transition-all hover:border-slate-700">
+                                                                <div className="flex items-center gap-3">
+                                                                    {editingCategoryId === cat.id ? (
+                                                                        <div className="flex-1 flex gap-2">
+                                                                            <input
+                                                                                type="text"
+                                                                                value={editCatIcon}
+                                                                                onChange={(e) => setEditCatIcon(e.target.value)}
+                                                                                className="w-10 h-10 text-center bg-slate-800 border border-slate-700 rounded-xl outline-none focus:border-emerald-500 text-lg"
+                                                                                maxLength={2}
+                                                                            />
+                                                                            <input
+                                                                                type="text"
+                                                                                value={editCatName}
+                                                                                onChange={(e) => setEditCatName(e.target.value)}
+                                                                                className="flex-1 px-3 bg-slate-800 border border-slate-700 rounded-xl text-sm outline-none focus:border-emerald-500"
+                                                                            />
+                                                                            <button
+                                                                                onClick={() => {
+                                                                                    const newCategories = categories.map(c =>
+                                                                                        c.id === cat.id ? { ...c, name: editCatName, icon: editCatIcon } : c
+                                                                                    );
+                                                                                    updateAllExpenseCategories(newCategories);
+                                                                                    setEditingCategoryId(null);
+                                                                                }}
+                                                                                className="p-2 bg-emerald-500 text-white rounded-xl hover:bg-emerald-600 shadow-lg shadow-emerald-500/20"
+                                                                            >
+                                                                                <Check size={18} />
+                                                                            </button>
+                                                                            <button
+                                                                                onClick={() => setEditingCategoryId(null)}
+                                                                                className="p-2 bg-slate-700 text-slate-400 rounded-xl hover:bg-slate-600"
+                                                                            >
+                                                                                <X size={18} />
+                                                                            </button>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <>
+                                                                            {/* Stats Visibility Toggle */}
+                                                                            <button
+                                                                                onClick={() => {
+                                                                                    const newList = isChecked
+                                                                                        ? statsCategoryIds.filter(id => id !== cat.id)
+                                                                                        : [...statsCategoryIds, cat.id];
+                                                                                    updateHouseStatsCategories(newList);
+                                                                                }}
+                                                                                className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${isChecked
+                                                                                    ? 'bg-emerald-500 border-emerald-500 text-white'
+                                                                                    : 'bg-transparent border-slate-700 text-transparent hover:border-slate-500'
+                                                                                    }`}
+                                                                                title={isChecked ? "Incluida en estadísticas" : "No incluida en estadísticas"}
+                                                                            >
+                                                                                <Check size={14} strokeWidth={3} />
+                                                                            </button>
+
+                                                                            <span className="text-2xl w-8 text-center">{cat.icon}</span>
+                                                                            <div className="flex-1 min-w-0">
+                                                                                <div className="text-sm font-bold text-slate-200 truncate">{cat.name}</div>
+                                                                                <div className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">
+                                                                                    {isChecked ? 'En Estadísticas' : 'Solo Gastos'}
+                                                                                </div>
+                                                                            </div>
+
+                                                                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                                {/* Move Up */}
+                                                                                <button
+                                                                                    onClick={() => {
+                                                                                        if (index === 0) return;
+                                                                                        const newCats = [...categories];
+                                                                                        [newCats[index - 1], newCats[index]] = [newCats[index], newCats[index - 1]];
+                                                                                        updateAllExpenseCategories(newCats);
+                                                                                    }}
+                                                                                    disabled={index === 0}
+                                                                                    className="p-1.5 text-slate-500 hover:text-white hover:bg-slate-800 rounded-lg disabled:opacity-0"
+                                                                                >
+                                                                                    <ChevronUp size={16} />
+                                                                                </button>
+                                                                                {/* Move Down */}
+                                                                                <button
+                                                                                    onClick={() => {
+                                                                                        const filtered = categories.filter(c => c.id !== 'settlement');
+                                                                                        if (index === filtered.length - 1) return;
+                                                                                        const newCats = [...categories];
+                                                                                        const realIdx = categories.findIndex(c => c.id === cat.id);
+                                                                                        const nextIdx = categories.findIndex((c, i) => i > realIdx && c.id !== 'settlement');
+                                                                                        if (nextIdx !== -1) {
+                                                                                            [newCats[realIdx], newCats[nextIdx]] = [newCats[nextIdx], newCats[realIdx]];
+                                                                                            updateAllExpenseCategories(newCats);
+                                                                                        }
+                                                                                    }}
+                                                                                    disabled={index === categories.filter(c => c.id !== 'settlement').length - 1}
+                                                                                    className="p-1.5 text-slate-500 hover:text-white hover:bg-slate-800 rounded-lg disabled:opacity-0"
+                                                                                >
+                                                                                    <ChevronDown size={16} />
+                                                                                </button>
+
+                                                                                {cat.id !== 'other' && cat.id !== 'settlement' ? (
+                                                                                    <>
+                                                                                        <button
+                                                                                            onClick={() => {
+                                                                                                setEditingCategoryId(cat.id);
+                                                                                                setEditCatName(cat.name);
+                                                                                                setEditCatIcon(cat.icon);
+                                                                                            }}
+                                                                                            className="p-1.5 text-slate-500 hover:text-blue-400 hover:bg-slate-800 rounded-lg"
+                                                                                            title="Editar"
+                                                                                        >
+                                                                                            <Edit size={16} />
+                                                                                        </button>
+                                                                                        <button
+                                                                                            onClick={() => {
+                                                                                                const firstConfirm = confirm(`¿Estás seguro de que quieres eliminar la categoría "${cat.name}"?`);
+                                                                                                if (firstConfirm) {
+                                                                                                    const secondConfirm = confirm(`¡ATENCIÓN! Al borrarla, TODOS los gastos asociados pasarán a la categoría "OTRO". ¿Confirmas que quieres proceder?`);
+                                                                                                    if (secondConfirm) {
+                                                                                                        deleteExpenseCategory(cat.id);
+                                                                                                    }
+                                                                                                }
+                                                                                            }}
+                                                                                            className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded-lg"
+                                                                                            title="Eliminar"
+                                                                                        >
+                                                                                            <Trash size={16} />
+                                                                                        </button>
+                                                                                    </>
+                                                                                ) : (
+                                                                                    <div className="p-1.5 text-slate-700" title="Categoría del sistema bloqueada">
+                                                                                        <Lock size={14} />
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+
+                                                                            <div className="relative group/color">
+                                                                                <input
+                                                                                    type="color"
+                                                                                    value={customColor}
+                                                                                    onChange={(e) => {
+                                                                                        updateHouseStatsCategoryColor(cat.id, e.target.value);
+                                                                                        // Also update master color in categories list
+                                                                                        const newCategories = categories.map(c =>
+                                                                                            c.id === cat.id ? { ...c, color: e.target.value } : c
+                                                                                        );
+                                                                                        updateAllExpenseCategories(newCategories);
+                                                                                    }}
+                                                                                    className="w-8 h-8 rounded-lg cursor-pointer border-2 border-slate-700 hover:border-emerald-500 transition-colors"
+                                                                                />
+                                                                                <Palette size={10} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none text-white opacity-0 group-hover/color:opacity-100" />
+                                                                            </div>
+                                                                        </>
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                         );
                                                     })}
+
+                                                    {/* Add New Quick Form */}
+                                                    <div className="bg-slate-900 border border-dashed border-slate-700 rounded-2xl p-3 flex gap-2">
+                                                        <input
+                                                            type="text"
+                                                            value={newCatIcon}
+                                                            onChange={(e) => setNewCatIcon(e.target.value)}
+                                                            className="w-10 h-10 text-center bg-slate-800 border border-slate-700 rounded-xl outline-none focus:border-emerald-500 text-lg"
+                                                            placeholder="📦"
+                                                            maxLength={2}
+                                                        />
+                                                        <input
+                                                            type="text"
+                                                            value={newCatName}
+                                                            onChange={(e) => setNewCatName(e.target.value)}
+                                                            className="flex-1 px-3 bg-slate-800 border border-slate-700 rounded-xl text-sm outline-none focus:border-emerald-500"
+                                                            placeholder="Nueva categoría..."
+                                                        />
+                                                        <button
+                                                            onClick={() => {
+                                                                if (!newCatName.trim()) return;
+                                                                const newCat = {
+                                                                    id: `custom_${Date.now()}`,
+                                                                    name: newCatName.trim(),
+                                                                    icon: newCatIcon || '📦',
+                                                                    color: '#64748B'
+                                                                };
+                                                                updateAllExpenseCategories([...categories, newCat]);
+                                                                // Also add to stats by default
+                                                                updateHouseStatsCategories([...statsCategoryIds, newCat.id]);
+                                                                setNewCatName("");
+                                                                setNewCatIcon("📦");
+                                                            }}
+                                                            disabled={!newCatName.trim()}
+                                                            className="p-2 bg-emerald-500 text-white rounded-xl hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+                                                        >
+                                                            <Plus size={24} />
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
@@ -1260,6 +1390,7 @@ export default function Expenses() {
                     )}
                 </>
             )}
+
         </div>
     );
 }

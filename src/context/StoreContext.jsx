@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef } from "r
 import {
     db, auth, googleProvider, signInWithPopup, signInWithRedirect, signOut, onAuthStateChanged,
     collection, addDoc, updateDoc, setDoc, deleteDoc, doc, onSnapshot, getDoc, getDocs,
-    query, orderBy, where, serverTimestamp, runTransaction
+    query, orderBy, where, serverTimestamp, runTransaction, writeBatch
 } from "../lib/firebase";
 
 const StoreContext = createContext();
@@ -423,10 +423,40 @@ export const StoreProvider = ({ children }) => {
     };
 
     const deleteExpenseCategory = async (categoryId) => {
-        if (!user || !household) return;
+        if (!user || !household || categoryId === 'other' || categoryId === 'settlement') return;
+
         const currentCategories = household.expenseCategories || [];
+        const newCategories = currentCategories.filter(c => c.id !== categoryId);
+
+        // Ensure 'other' still exists in the list as it's the fallback
+        const hasOther = newCategories.some(c => c.id === 'other');
+        if (!hasOther) {
+            newCategories.push({ id: 'other', name: 'Otro', icon: '📦', color: '#64748B' });
+        }
+
+        const batch = writeBatch(db);
+
+        // 1. Update household categories
+        const houseRef = doc(db, "households", household.id);
+        batch.update(houseRef, {
+            expenseCategories: newCategories,
+            houseStatsCategories: (household.houseStatsCategories || []).filter(id => id !== categoryId)
+        });
+
+        // 2. Reassign all expenses of this category to 'other'
+        const affectedExpenses = expenses.filter(e => e.category === categoryId);
+        affectedExpenses.forEach(exp => {
+            const expRef = doc(db, "expenses", exp.id);
+            batch.update(expRef, { category: 'other' });
+        });
+
+        await batch.commit();
+    };
+
+    const updateAllExpenseCategories = async (categories) => {
+        if (!user || !household) return;
         await updateDoc(doc(db, "households", household.id), {
-            expenseCategories: currentCategories.filter(c => c.id !== categoryId)
+            expenseCategories: categories
         });
     };
 
@@ -544,7 +574,7 @@ export const StoreProvider = ({ children }) => {
             createHousehold, joinHousehold,
             meals, menu, expenses,
             addMeal, updateMealStock, updateMeal, deleteMeal, setMenuItem, addExpense, updateExpense, deleteExpense,
-            addExpenseCategory, deleteExpenseCategory, updateHouseStatsCategories, updateHouseStatsPeriod, updateHouseStatsCategoryColor,
+            addExpenseCategory, deleteExpenseCategory, updateAllExpenseCategories, updateHouseStatsCategories, updateHouseStatsPeriod, updateHouseStatsCategoryColor,
             // User Actions
             switchHousehold, leaveHousehold, removeMember,
             // Admin exports
