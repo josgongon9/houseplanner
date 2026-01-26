@@ -3,7 +3,7 @@ import { useStore } from '../context/StoreContext';
 import { Plus, ArrowLeft, DollarSign, TrendingUp, Calendar, User, ArrowRightLeft, Check, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Lock, Unlock, Grid, PieChart as PieChartIcon, Trash, Edit, Divide, Percent, Zap, Flame, Droplets, BarChart2, Home, Settings, Palette, GripVertical } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, subMonths, addMonths, isSameMonth, startOfYear, endOfYear, eachMonthOfInterval, isFuture, isPast, isThisMonth, addYears, subYears } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Brush } from 'recharts';
 
 const DEFAULT_CATEGORIES = [
     { id: 'groceries', name: 'Supermercado', icon: '🛒', color: '#F97316' },
@@ -975,13 +975,20 @@ export default function Expenses() {
                                                             <RechartsTooltip
                                                                 cursor={{ fill: '#334155', opacity: 0.4 }}
                                                                 formatter={(value) => [`${value.toFixed(2)}€`, '']}
-                                                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)' }}
+                                                                contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)' }}
                                                             />
                                                             <Legend
-                                                                verticalAlign="bottom"
+                                                                verticalAlign="top"
                                                                 height={40}
                                                                 iconType="circle"
-                                                                wrapperStyle={{ paddingTop: '10px', fontSize: '10px', fontWeight: 'bold' }}
+                                                                wrapperStyle={{ paddingBottom: '10px', fontSize: '10px', fontWeight: 'bold' }}
+                                                            />
+                                                            <Brush
+                                                                dataKey="name"
+                                                                height={30}
+                                                                stroke="#10b981"
+                                                                fill="#1e293b"
+                                                                tickFormatter={() => ''}
                                                             />
                                                             {statsCategories.map((cat, idx) => (
                                                                 <Bar
@@ -1003,7 +1010,7 @@ export default function Expenses() {
                                                 </h3>
                                                 <div className="h-[400px] w-full bg-slate-900/30 p-3 rounded-xl border border-slate-800">
                                                     <ResponsiveContainer width="100%" height="100%">
-                                                        <BarChart data={yearUtilityData}>
+                                                        <BarChart data={yearUtilityData} margin={{ top: 10, right: 5, left: -25, bottom: 5 }}>
                                                             <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
                                                             <XAxis dataKey="name" fontSize={10} axisLine={false} tickLine={false} />
                                                             <YAxis fontSize={10} axisLine={false} tickLine={false} />
@@ -1011,6 +1018,13 @@ export default function Expenses() {
                                                                 cursor={{ fill: '#334155', opacity: 0.4 }}
                                                                 formatter={(value) => [`${value.toFixed(2)}€`, '']}
                                                                 contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px' }}
+                                                            />
+                                                            <Brush
+                                                                dataKey="name"
+                                                                height={30}
+                                                                stroke="#8b5cf6"
+                                                                fill="#1e293b"
+                                                                tickFormatter={() => ''}
                                                             />
                                                             <Bar dataKey="absoluteTotal" name="Gasto Real Mensual" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
                                                         </BarChart>

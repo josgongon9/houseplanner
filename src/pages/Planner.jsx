@@ -23,6 +23,7 @@ export default function Planner() {
         const counts = {};
         Object.values(menu).forEach(menuEntry => {
             if (!menuEntry) return; // Skip if undefined/null
+            if (menuEntry.processed) return; // Skip if already processed (stock already reduced)
 
             // New format: menuEntry.meals is an array of {mealId, portion}
             if (menuEntry.meals && Array.isArray(menuEntry.meals)) {
@@ -585,21 +586,25 @@ const MonthView = ({ currentDate, menu, onDateSelect }) => {
                                 ${dayIsToday
                                     ? 'bg-emerald-500/20 border-emerald-500 ring-1 ring-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)] z-10 scale-105'
                                     : isCurrentMonth
-                                        ? 'bg-surface border-slate-700'
+                                        ? isPast(day)
+                                            ? 'bg-slate-900/30 border-slate-800 opacity-60'
+                                            : 'bg-surface border-slate-700'
                                         : 'bg-transparent border-transparent opacity-30'}
                             `}
                         >
-                            <span className={`text-sm ${dayIsToday ? 'text-white font-bold' : (isCurrentMonth ? 'text-slate-300 font-medium' : 'text-slate-600 font-medium')}`}>
+                            <span className={`text-sm ${dayIsToday ? 'text-white font-bold' :
+                                    (isCurrentMonth ? (isPast(day) ? 'text-slate-600 font-medium' : 'text-slate-300 font-medium') : 'text-slate-600 font-medium')
+                                }`}>
                                 {format(day, 'd')}
                             </span>
 
                             {/* Status Indicators */}
                             <div className="mt-1 h-2 flex items-center justify-center">
                                 {status === 'full' && (
-                                    <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                                    <div className={`w-2 h-2 rounded-full ${isPast(day) && !dayIsToday ? 'bg-emerald-500/50' : 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]'}`}></div>
                                 )}
                                 {status === 'partial' && (
-                                    <div className="w-2 h-2 rounded-full bg-amber-500"></div>
+                                    <div className={`w-2 h-2 rounded-full ${isPast(day) && !dayIsToday ? 'bg-amber-500/50' : 'bg-amber-500'}`}></div>
                                 )}
                                 {status === 'empty' && isCurrentMonth && !isPast(day) && (
                                     <div className="w-1.5 h-1.5 rounded-full bg-slate-800"></div>
