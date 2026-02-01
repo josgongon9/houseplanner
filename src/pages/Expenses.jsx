@@ -985,14 +985,15 @@ export default function Expenses() {
                                                             <YAxis fontSize={11} axisLine={false} tickLine={false} />
                                                             <RechartsTooltip
                                                                 cursor={{ fill: '#334155', opacity: 0.4 }}
-                                                                formatter={(value) => [`${value.toFixed(2)}€`, '']}
-                                                                contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)' }}
+                                                                formatter={(value, name) => [`${value.toFixed(2)}€`, name]}
+                                                                labelStyle={{ color: '#94a3b8', marginBottom: '0.5rem' }}
+                                                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)' }}
                                                             />
                                                             <Legend
                                                                 verticalAlign="top"
-                                                                height={40}
+                                                                height={50}
                                                                 iconType="circle"
-                                                                wrapperStyle={{ paddingBottom: '10px', fontSize: '10px', fontWeight: 'bold' }}
+                                                                wrapperStyle={{ paddingBottom: '20px', fontSize: '12px', fontWeight: 'bold' }}
                                                             />
                                                             <Brush
                                                                 dataKey="name"
