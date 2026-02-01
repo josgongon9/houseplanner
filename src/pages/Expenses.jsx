@@ -275,18 +275,29 @@ export default function Expenses() {
         monthlyExpenses.forEach(exp => {
             if (exp.category === 'settlement') return;
 
-            const splitAmong = exp.splitAmong || [];
+            let splitAmong = exp.splitAmong || [];
+            // Fallback: If no split specified, assume everyone split it equal
+            if (splitAmong.length === 0) {
+                splitAmong = householdMembers.map(m => m.id);
+            }
+
             const splitMode = exp.splitMode || 'equal';
             const customAmounts = exp.customAmounts || {};
             const amount = Number(exp.amount);
 
             if (splitMode === 'custom') {
-                // Use custom amounts
-                Object.entries(customAmounts).forEach(([uid, amt]) => {
-                    expenseMap[uid] = (expenseMap[uid] || 0) + Number(amt);
-                });
+                const hasCustom = Object.keys(customAmounts).length > 0;
+                if (hasCustom) {
+                    Object.entries(customAmounts).forEach(([uid, amt]) => {
+                        expenseMap[uid] = (expenseMap[uid] || 0) + Number(amt);
+                    });
+                } else {
+                    const perPerson = amount / splitAmong.length;
+                    splitAmong.forEach(uid => {
+                        expenseMap[uid] = (expenseMap[uid] || 0) + perPerson;
+                    });
+                }
             } else {
-                // Equal split among participants
                 const perPerson = splitAmong.length > 0 ? amount / splitAmong.length : 0;
                 splitAmong.forEach(uid => {
                     expenseMap[uid] = (expenseMap[uid] || 0) + perPerson;
@@ -743,7 +754,7 @@ export default function Expenses() {
                                             <Avatar url={p.member?.photoURL} name={p.member?.displayName} size="xs" />
                                             <div className="flex flex-col">
                                                 <span className="text-[10px] text-slate-500 font-bold uppercase leading-none">{p.member?.displayName?.split(' ')[0]}</span>
-                                                <span className="text-sm font-bold text-white leading-none mt-1">{p.amount.toFixed(0)}€</span>
+                                                <span className="text-sm font-bold text-white leading-none mt-1">{p.amount.toFixed(2)}€</span>
                                             </div>
                                         </div>
                                     ))}

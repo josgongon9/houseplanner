@@ -211,7 +211,7 @@ export default function Planner() {
     }, [startOfCurrentWeek]);
 
     return (
-        <div className="pb-24">
+        <div className="pb-24 max-w-md mx-auto w-full">
             {/* Header */}
             <div className="sticky top-0 z-10 bg-background/90 backdrop-blur-md border-b border-slate-800 shadow-xl">
                 <div className="px-4 py-2 flex items-center justify-between">
@@ -593,7 +593,7 @@ const MonthView = ({ currentDate, menu, onDateSelect }) => {
                             `}
                         >
                             <span className={`text-sm ${dayIsToday ? 'text-white font-bold' :
-                                    (isCurrentMonth ? (isPast(day) ? 'text-slate-600 font-medium' : 'text-slate-300 font-medium') : 'text-slate-600 font-medium')
+                                (isCurrentMonth ? (isPast(day) ? 'text-slate-600 font-medium' : 'text-slate-300 font-medium') : 'text-slate-600 font-medium')
                                 }`}>
                                 {format(day, 'd')}
                             </span>

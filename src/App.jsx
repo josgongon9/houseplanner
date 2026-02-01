@@ -60,7 +60,7 @@ function App() {
         <div className="min-h-screen bg-background text-slate-100">
             <BrowserRouter>
                 <StoreProvider>
-                    <div className="max-w-md mx-auto min-h-screen bg-background shadow-xl">
+                    <div className="w-full max-w-7xl mx-auto min-h-screen bg-background shadow-xl border-x border-slate-800/50">
                         <Routes>
                             <Route path="/" element={
                                 <ProtectedRoute>

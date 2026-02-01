@@ -70,7 +70,7 @@ export default function Meals() {
         .sort((a, b) => a.name.localeCompare(b.name));
 
     return (
-        <div className="p-4 space-y-4">
+        <div className="p-4 space-y-4 max-w-md mx-auto w-full">
             <header className="flex justify-between items-center">
                 <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">Comidas</h1>
                 <button
@@ -167,8 +167,8 @@ export default function Meals() {
                             <div className="flex items-center gap-3">
                                 <div className="flex items-center gap-2">
                                     <div className={`flex flex-col items-center justify-center min-w-[50px] rounded-xl p-2 border transition-colors ${(plannedCounts[meal.id] || 0) > 0
-                                            ? 'bg-blue-500/10 border-blue-500/30'
-                                            : 'bg-slate-900 border-slate-800'
+                                        ? 'bg-blue-500/10 border-blue-500/30'
+                                        : 'bg-slate-900 border-slate-800'
                                         }`}>
                                         <span className={`text-[10px] font-bold uppercase tracking-tighter mb-0.5 ${(plannedCounts[meal.id] || 0) > 0 ? 'text-blue-400/80' : 'text-slate-500'
                                             }`}>Menú</span>

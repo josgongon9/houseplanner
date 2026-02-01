@@ -37,7 +37,7 @@ export default function HouseholdSetup() {
 
     if (mode === 'welcome') {
         return (
-            <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 text-center animate-in fade-in">
+            <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 text-center animate-in fade-in max-w-md mx-auto w-full">
                 <div className="mb-8 p-4 bg-primary/20 rounded-full">
                     <Home size={48} className="text-primary" />
                 </div>

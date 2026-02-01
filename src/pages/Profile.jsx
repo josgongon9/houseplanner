@@ -151,7 +151,7 @@ export default function Profile() {
     }
 
     return (
-        <div className="p-4 space-y-6 pb-24 animate-in fade-in duration-500">
+        <div className="p-4 space-y-6 pb-24 animate-in fade-in duration-500 max-w-md mx-auto w-full">
             <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-400 to-teal-600 bg-clip-text text-transparent">
                 Mi Perfil
             </h1>

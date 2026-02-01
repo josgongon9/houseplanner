@@ -469,49 +469,82 @@ const BudgetView = ({ year, data, onUpdate, pieData, totals }) => {
 
     return (
         <div className="space-y-8">
-            {/* 1. Yearly Summary Table */}
-            <div className="bg-surface rounded-2xl border border-slate-700 overflow-x-auto">
-                <table className="w-full text-sm whitespace-nowrap">
-                    <thead className="bg-slate-900 text-slate-400">
-                        <tr>
-                            <th className="p-3 text-left sticky left-0 bg-slate-900 z-10 border-r border-slate-700 min-w-[180px]">Resumen Anual</th>
-                            {months.map(m => <th key={m} className="p-2 text-center text-xs w-32 min-w-[100px]">{m}</th>)}
-                            <th className="p-3 text-right bg-slate-800 text-white shadow-[-4px_0_10px_rgba(0,0,0,0.3)] min-w-[120px]">TOTAL</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800">
-                        <tr className="bg-emerald-900/10">
-                            <td className="p-3 font-bold text-emerald-400 sticky left-0 bg-surface border-r border-slate-700 z-10">Ingresos</td>
-                            {months.map((_, i) => (
-                                <td key={i} className="p-2 text-center text-emerald-400/80 min-w-[100px]">
-                                    {getMonthTotals(i).inc > 0 ? getMonthTotals(i).inc.toFixed(2) : '-'}
-                                </td>
-                            ))}
-                            <td className="p-3 text-right font-bold text-emerald-400 bg-emerald-900/20 shadow-[-4px_0_10px_rgba(0,0,0,0.1)]">{totals.income.toFixed(2)}€</td>
-                        </tr>
-                        <tr className="bg-red-900/10">
-                            <td className="p-3 font-bold text-red-400 sticky left-0 bg-surface border-r border-slate-700 z-10">Gastos</td>
-                            {months.map((_, i) => (
-                                <td key={i} className="p-2 text-center text-red-400/80 min-w-[100px]">
-                                    {getMonthTotals(i).exp > 0 ? getMonthTotals(i).exp.toFixed(2) : '-'}
-                                </td>
-                            ))}
-                            <td className="p-3 text-right font-bold text-red-400 bg-red-900/20 shadow-[-4px_0_10px_rgba(0,0,0,0.1)]">{totals.expense.toFixed(2)}€</td>
-                        </tr>
-                        <tr className="bg-slate-800 font-bold">
-                            <td className="p-3 text-slate-200 sticky left-0 bg-slate-800 border-r border-slate-700 z-10">Ahorro</td>
-                            {months.map((_, i) => {
-                                const sav = getMonthTotals(i).save;
-                                return (
-                                    <td key={i} className={`p-2 text-center min-w-[100px] ${sav >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
-                                        {sav !== 0 ? sav.toFixed(2) : '-'}
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                {/* 1. Yearly Summary Table */}
+                <div className="xl:col-span-2 bg-surface rounded-2xl border border-slate-700 overflow-x-auto">
+                    <table className="w-full text-sm whitespace-nowrap">
+                        <thead className="bg-slate-900 text-slate-400">
+                            <tr>
+                                <th className="p-3 text-left sticky left-0 bg-slate-900 z-10 border-r border-slate-700 min-w-[140px] md:min-w-[180px]">Resumen Anual</th>
+                                {months.map(m => <th key={m} className="p-2 text-center text-xs min-w-[65px] md:min-w-[80px]">{m}</th>)}
+                                <th className="p-3 text-right bg-slate-800 text-white shadow-[-4px_0_10px_rgba(0,0,0,0.3)] min-w-[100px]">TOTAL</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800">
+                            <tr className="bg-emerald-900/10">
+                                <td className="p-3 font-bold text-emerald-400 sticky left-0 bg-surface border-r border-slate-700 z-10">Ingresos</td>
+                                {months.map((_, i) => (
+                                    <td key={i} className="p-2 text-center text-emerald-400/80 min-w-[65px] md:min-w-[80px]">
+                                        {getMonthTotals(i).inc > 0 ? getMonthTotals(i).inc.toFixed(2) : '-'}
                                     </td>
-                                )
-                            })}
-                            <td className="p-3 text-right text-blue-400 bg-slate-700/50 shadow-[-4px_0_10px_rgba(0,0,0,0.1)]">{totals.savings.toFixed(2)}€</td>
-                        </tr>
-                    </tbody>
-                </table>
+                                ))}
+                                <td className="p-3 text-right font-bold text-emerald-400 bg-emerald-900/20 shadow-[-4px_0_10px_rgba(0,0,0,0.1)]">{totals.income.toFixed(2)}€</td>
+                            </tr>
+                            <tr className="bg-red-900/10">
+                                <td className="p-3 font-bold text-red-400 sticky left-0 bg-surface border-r border-slate-700 z-10">Gastos</td>
+                                {months.map((_, i) => (
+                                    <td key={i} className="p-2 text-center text-red-400/80 min-w-[65px] md:min-w-[80px]">
+                                        {getMonthTotals(i).exp > 0 ? getMonthTotals(i).exp.toFixed(2) : '-'}
+                                    </td>
+                                ))}
+                                <td className="p-3 text-right font-bold text-red-400 bg-red-900/20 shadow-[-4px_0_10px_rgba(0,0,0,0.1)]">{totals.expense.toFixed(2)}€</td>
+                            </tr>
+                            <tr className="bg-slate-800 font-bold">
+                                <td className="p-3 text-slate-200 sticky left-0 bg-slate-800 border-r border-slate-700 z-10">Ahorro</td>
+                                {months.map((_, i) => {
+                                    const sav = getMonthTotals(i).save;
+                                    return (
+                                        <td key={i} className={`p-2 text-center min-w-[65px] md:min-w-[80px] ${sav >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
+                                            {sav !== 0 ? sav.toFixed(2) : '-'}
+                                        </td>
+                                    )
+                                })}
+                                <td className="p-3 text-right text-blue-400 bg-slate-700/50 shadow-[-4px_0_10px_rgba(0,0,0,0.1)]">{totals.savings.toFixed(2)}€</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* General Pie Chart */}
+                <div className="bg-surface p-4 rounded-2xl border border-slate-700 flex flex-col items-center justify-center min-h-[300px]">
+                    <h3 className="text-lg font-bold mb-4">Presupuesto Anual</h3>
+                    <ResponsiveContainer width="100%" height={250}>
+                        <PieChart>
+                            <Pie
+                                data={pieData}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={60}
+                                outerRadius={80}
+                                paddingAngle={5}
+                                dataKey="value"
+                            >
+                                {pieData.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={entry.color} />
+                                ))}
+                            </Pie>
+                            <RechartsTooltip
+                                formatter={(val) => `${val.toFixed(2)}€`}
+                                contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155' }}
+                            />
+                            <Legend />
+                        </PieChart>
+                    </ResponsiveContainer>
+                    <div className="text-center mt-2">
+                        <span className="text-2xl font-bold">{totals.savings.toFixed(2)}€</span>
+                        <p className="text-xs text-slate-400">Ahorro Neto</p>
+                    </div>
+                </div>
             </div>
 
             {/* Detailed Tables */}
@@ -605,39 +638,6 @@ const BudgetView = ({ year, data, onUpdate, pieData, totals }) => {
                         })}
                     </tbody>
                 </table>
-            </div>
-
-
-
-            {/* General Pie Chart */}
-            <div className="bg-surface p-4 rounded-2xl border border-slate-700 flex flex-col items-center justify-center min-h-[300px]">
-                <h3 className="text-lg font-bold mb-4">Presupuesto Anual</h3>
-                <ResponsiveContainer width="100%" height={250}>
-                    <PieChart>
-                        <Pie
-                            data={pieData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={60}
-                            outerRadius={80}
-                            paddingAngle={5}
-                            dataKey="value"
-                        >
-                            {pieData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.color} />
-                            ))}
-                        </Pie>
-                        <RechartsTooltip
-                            formatter={(val) => `${val.toFixed(2)}€`}
-                            contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155' }}
-                        />
-                        <Legend />
-                    </PieChart>
-                </ResponsiveContainer>
-                <div className="text-center mt-2">
-                    <span className="text-2xl font-bold">{totals.savings.toFixed(2)}€</span>
-                    <p className="text-xs text-slate-400">Ahorro Neto</p>
-                </div>
             </div>
         </div>
     );
@@ -882,9 +882,7 @@ const InvestmentsView = ({ year, stocks, dividends, userId }) => {
                 </table>
             </div>
 
-            <div className="bg-blue-500/10 border border-blue-500/30 p-4 rounded-xl text-xs text-blue-300">
-                ℹ️ <b>Nota fiscal:</b> Estos datos son meramente informativos para tu control personal y facilitación de la declaración de la renta. Verifica siempre los datos con tu broker.
-            </div>
+
         </div>
     )
 }

@@ -77,7 +77,7 @@ export default function Admin() {
     }
 
     return (
-        <div className="min-h-screen bg-background pb-20 p-4 space-y-6">
+        <div className="min-h-screen bg-background pb-20 p-4 space-y-6 max-w-md mx-auto w-full">
             <header className="flex items-center gap-4 border-b border-slate-700 pb-4">
                 <Link to="/" className="p-2 hover:bg-slate-800 rounded-full"><ChevronLeft /></Link>
                 <h1 className="text-2xl font-bold flex items-center gap-2">
