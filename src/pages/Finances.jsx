@@ -3,7 +3,7 @@ import { useStore } from '../context/StoreContext';
 import { db, doc, getDoc, setDoc, onSnapshot, updateDoc, collection, addDoc, query, where, orderBy, getDocs, deleteDoc, runTransaction } from '../lib/firebase';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { TrendingUp, PieChart as PieIcon, ArrowUpCircle, ArrowDownCircle, DollarSign, Plus, Trash2, Edit2, Save, X, ChevronLeft, ChevronRight, Settings, Wallet, ArrowUp, ArrowDown, Calendar as CalendarIcon, CheckCircle2, AlertCircle } from 'lucide-react';
+import { TrendingUp, PieChart as PieIcon, ArrowUpCircle, ArrowDownCircle, DollarSign, Plus, Trash2, Edit2, Save, X, ChevronLeft, ChevronRight, Settings, Wallet, ArrowUp, ArrowDown, Calendar as CalendarIcon, CheckCircle2, AlertCircle, ChevronUp, ChevronDown, User, Users } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
 import { differenceInDays, eachMonthOfInterval, startOfMonth as startOfM, endOfMonth as endOfM, isWithinInterval, getDaysInMonth } from 'date-fns';
 
@@ -646,6 +646,8 @@ const BudgetView = ({ year, data, onUpdate, pieData, totals }) => {
 const InvestmentsView = ({ year, stocks, dividends, userId }) => {
     const [invTab, setInvTab] = useState('stocks'); // 'stocks' | 'dividends'
     const [isAdding, setIsAdding] = useState(false);
+    const [editingStock, setEditingStock] = useState(null); // Record being edited
+    const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' }); // Sorting state
 
     // New Stock Form
     const [sDate, setSDate] = useState(new Date().toISOString().split('T')[0]);
@@ -658,56 +660,143 @@ const InvestmentsView = ({ year, stocks, dividends, userId }) => {
         const profit = Number(sSell) - Number(sBuy);
         const roi = (profit / Number(sBuy)) * 100;
 
-        // 1. Add Investment Record
-        await addDoc(collection(db, 'users', userId, 'investments'), {
-            type: 'sale',
-            date: sDate,
-            year: year,
-            company: sCompany,
-            buyAmount: Number(sBuy),
-            sellAmount: Number(sSell),
-            profit,
-            roi,
-            createdAt: new Date().toISOString()
-        });
-
-        // 2. Automatically update Monthly Budget
-        try {
-            const saleMonth = new Date(sDate).getMonth(); // 0-11
-            const financeDocRef = doc(db, 'users', userId, 'finance_years', String(year));
-
-            await runTransaction(db, async (transaction) => {
-                const sfDoc = await transaction.get(financeDocRef);
-                if (!sfDoc.exists()) return; // Should exist if we are viewing it
-
-                const data = sfDoc.data();
-
-                // Ensure 'Acciones' is in incomeCategories
-                let incomeCategories = data.incomeCategories || [];
-                if (!incomeCategories.includes("Acciones")) {
-                    incomeCategories.push("Acciones");
-                }
-
-                // Prepare nested path safely
-                const monthly = data.monthly || {};
-                if (!monthly[saleMonth]) monthly[saleMonth] = { incomes: {}, expenses: {} };
-                if (!monthly[saleMonth].incomes) monthly[saleMonth].incomes = {};
-
-                // Add profit to existing value (accummulate)
-                const currentVal = Number(monthly[saleMonth].incomes["Acciones"] || 0);
-                monthly[saleMonth].incomes["Acciones"] = currentVal + profit;
-
-                transaction.update(financeDocRef, {
-                    incomeCategories,
-                    monthly
-                });
+        if (editingStock) {
+            // ESTIMATED: Update existing record
+            await updateDoc(doc(db, 'users', userId, 'investments', editingStock.id), {
+                date: sDate,
+                company: sCompany,
+                buyAmount: Number(sBuy),
+                sellAmount: Number(sSell),
+                profit,
+                roi,
+                updatedAt: new Date().toISOString()
             });
-        } catch (error) {
-            console.error("Error updating budget with stock profit:", error);
+
+            // Update Budget (Remove old profit, Add new profit)
+            try {
+                const oldMonth = new Date(editingStock.date).getMonth();
+                const newMonth = new Date(sDate).getMonth();
+                const oldProfit = editingStock.profit;
+
+                if (oldMonth !== newMonth || Math.abs(oldProfit - profit) > 0.01) {
+                    const financeDocRef = doc(db, 'users', userId, 'finance_years', String(year));
+                    await runTransaction(db, async (transaction) => {
+                        const sfDoc = await transaction.get(financeDocRef);
+                        if (!sfDoc.exists()) return;
+                        const data = sfDoc.data();
+                        const monthly = data.monthly || {};
+
+                        // 1. Remove old
+                        if (monthly[oldMonth]?.incomes?.["Acciones"]) {
+                            monthly[oldMonth].incomes["Acciones"] -= oldProfit;
+                        }
+
+                        // 2. Add new
+                        if (!monthly[newMonth]) monthly[newMonth] = { incomes: {}, expenses: {} };
+                        if (!monthly[newMonth].incomes) monthly[newMonth].incomes = {};
+
+                        const currentVal = Number(monthly[newMonth].incomes["Acciones"] || 0);
+                        monthly[newMonth].incomes["Acciones"] = currentVal + profit;
+
+                        transaction.update(financeDocRef, { monthly });
+                    });
+                }
+            } catch (error) {
+                console.error("Error updating budget on edit:", error);
+            }
+
+            setEditingStock(null);
+        } else {
+            // CREATE new record
+            await addDoc(collection(db, 'users', userId, 'investments'), {
+                type: 'sale',
+                date: sDate,
+                year: year,
+                company: sCompany,
+                buyAmount: Number(sBuy),
+                sellAmount: Number(sSell),
+                profit,
+                roi,
+                createdAt: new Date().toISOString()
+            });
+
+            // Automatically update Monthly Budget
+            try {
+                const saleMonth = new Date(sDate).getMonth(); // 0-11
+                const financeDocRef = doc(db, 'users', userId, 'finance_years', String(year));
+
+                await runTransaction(db, async (transaction) => {
+                    const sfDoc = await transaction.get(financeDocRef);
+                    if (!sfDoc.exists()) return; // Should exist if we are viewing it
+
+                    const data = sfDoc.data();
+
+                    // Ensure 'Acciones' is in incomeCategories
+                    let incomeCategories = data.incomeCategories || [];
+                    if (!incomeCategories.includes("Acciones")) {
+                        incomeCategories.push("Acciones");
+                    }
+
+                    // Prepare nested path safely
+                    const monthly = data.monthly || {};
+                    if (!monthly[saleMonth]) monthly[saleMonth] = { incomes: {}, expenses: {} };
+                    if (!monthly[saleMonth].incomes) monthly[saleMonth].incomes = {};
+
+                    // Add profit to existing value (accummulate)
+                    const currentVal = Number(monthly[saleMonth].incomes["Acciones"] || 0);
+                    monthly[saleMonth].incomes["Acciones"] = currentVal + profit;
+
+                    transaction.update(financeDocRef, {
+                        incomeCategories,
+                        monthly
+                    });
+                });
+            } catch (error) {
+                console.error("Error updating budget with stock profit:", error);
+            }
         }
 
         setIsAdding(false);
         setSCompany(""); setSBuy(""); setSSell("");
+    };
+
+    const handleEditStock = (item) => {
+        setEditingStock(item);
+        setSDate(item.date);
+        setSCompany(item.company);
+        setSBuy(item.buyAmount);
+        setSSell(item.sellAmount);
+        setIsAdding(true);
+    };
+
+    // Sorting Logic
+    const sortedStocks = useMemo(() => {
+        let sorted = [...stocks];
+        if (sortConfig.key) {
+            sorted.sort((a, b) => {
+                let aVal = a[sortConfig.key];
+                let bVal = b[sortConfig.key];
+
+                // Handle strings (company) case-insensitive
+                if (typeof aVal === 'string') {
+                    aVal = aVal.toLowerCase();
+                    bVal = bVal.toLowerCase();
+                }
+
+                if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+                if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+                return 0;
+            });
+        }
+        return sorted;
+    }, [stocks, sortConfig]);
+
+    const requestSort = (key) => {
+        let direction = 'asc';
+        if (sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        setSortConfig({ key, direction });
     };
 
     // Form for Dividends
@@ -809,7 +898,7 @@ const InvestmentsView = ({ year, stocks, dividends, userId }) => {
 
             <div className="flex justify-between items-center">
                 <h2 className="text-lg font-bold text-slate-200">{invTab === 'stocks' ? 'Control de Ventas Acciones' : 'Registro de Dividendos'}</h2>
-                <button onClick={() => setIsAdding(!isAdding)} className="bg-amber-500 text-black px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2">
+                <button onClick={() => { setIsAdding(!isAdding); setEditingStock(null); if (!editingStock) { setSCompany(""); setSBuy(""); setSSell(""); } }} className="bg-amber-500 text-black px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2">
                     {isAdding ? <X size={16} /> : <Plus size={16} />}
                     {isAdding ? 'Cancelar' : 'Añadir Operación'}
                 </button>
@@ -824,7 +913,7 @@ const InvestmentsView = ({ year, stocks, dividends, userId }) => {
                             <div><label className="text-xs text-slate-400">Empresa</label><input required value={sCompany} onChange={e => setSCompany(e.target.value)} placeholder="Ticker" className="w-full bg-slate-800 border-slate-700 rounded-lg p-2 text-sm" /></div>
                             <div><label className="text-xs text-slate-400">Compra (€)</label><input type="number" step="0.01" required value={sBuy} onChange={e => setSBuy(e.target.value)} className="w-full bg-slate-800 border-slate-700 rounded-lg p-2 text-sm" /></div>
                             <div><label className="text-xs text-slate-400">Venta (€)</label><input type="number" step="0.01" required value={sSell} onChange={e => setSSell(e.target.value)} className="w-full bg-slate-800 border-slate-700 rounded-lg p-2 text-sm" /></div>
-                            <button className="bg-emerald-500 text-white p-2 rounded-lg font-bold">Guardar</button>
+                            <button className="bg-emerald-500 text-white p-2 rounded-lg font-bold">{editingStock ? 'Actualizar' : 'Guardar'}</button>
                         </form>
                     ) : (
                         <form onSubmit={handleAddDividend} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
@@ -842,17 +931,21 @@ const InvestmentsView = ({ year, stocks, dividends, userId }) => {
                 <table className="w-full text-sm">
                     <thead className="bg-slate-900 text-slate-400">
                         <tr>
-                            <th className="p-3 text-left">Fecha</th>
-                            <th className="p-3 text-left">Empresa</th>
-                            {invTab === 'stocks' && <th className="p-3 text-right">Inversión</th>}
-                            {invTab === 'stocks' && <th className="p-3 text-right">Venta</th>}
-                            <th className="p-3 text-right font-bold text-white">Ganancia</th>
-                            {invTab === 'stocks' && <th className="p-3 text-right">ROI</th>}
+                            <th onClick={() => requestSort('date')} className="p-3 text-left cursor-pointer hover:text-white transition-colors select-none group min-w-[100px]">
+                                <span className="flex items-center gap-1">Fecha {sortConfig.key === 'date' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}</span>
+                            </th>
+                            <th onClick={() => requestSort('company')} className="p-3 text-left cursor-pointer hover:text-white transition-colors select-none min-w-[100px]">
+                                <span className="flex items-center gap-1">Empresa {sortConfig.key === 'company' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}</span>
+                            </th>
+                            {invTab === 'stocks' && <th onClick={() => requestSort('buyAmount')} className="p-3 text-right cursor-pointer hover:text-white transition-colors select-none min-w-[100px]"><span className="flex items-center justify-end gap-1">Inversión {sortConfig.key === 'buyAmount' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}</span></th>}
+                            {invTab === 'stocks' && <th onClick={() => requestSort('sellAmount')} className="p-3 text-right cursor-pointer hover:text-white transition-colors select-none min-w-[100px]"><span className="flex items-center justify-end gap-1">Venta {sortConfig.key === 'sellAmount' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}</span></th>}
+                            <th onClick={() => requestSort('profit')} className="p-3 text-right font-bold text-white cursor-pointer hover:text-emerald-400 transition-colors select-none min-w-[100px]"><span className="flex items-center justify-end gap-1">Ganancia {sortConfig.key === 'profit' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}</span></th>
+                            {invTab === 'stocks' && <th onClick={() => requestSort('roi')} className="p-3 text-right cursor-pointer hover:text-white transition-colors select-none min-w-[80px]"><span className="flex items-center justify-end gap-1">ROI {sortConfig.key === 'roi' && (sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}</span></th>}
                             <th className="p-3 w-10"></th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
-                        {(invTab === 'stocks' ? stocks : dividends).map(item => {
+                        {(invTab === 'stocks' ? sortedStocks : dividends).map(item => {
                             const val = invTab === 'stocks' ? item.profit : item.amount;
 
                             return (
@@ -869,8 +962,11 @@ const InvestmentsView = ({ year, stocks, dividends, userId }) => {
                                             {item.roi.toFixed(2)}%
                                         </td>
                                     )}
-                                    <td className="p-3">
-                                        <button onClick={() => handleDelete(item.id)} className="text-slate-600 hover:text-red-400"><Trash2 size={16} /></button>
+                                    <td className="p-3 flex items-center justify-end gap-1">
+                                        {invTab === 'stocks' && (
+                                            <button onClick={() => handleEditStock(item)} className="text-slate-600 hover:text-amber-500 p-1"><Edit2 size={16} /></button>
+                                        )}
+                                        <button onClick={() => handleDelete(item.id)} className="text-slate-600 hover:text-red-400 p-1"><Trash2 size={16} /></button>
                                     </td>
                                 </tr>
                             )
@@ -881,11 +977,9 @@ const InvestmentsView = ({ year, stocks, dividends, userId }) => {
                     </tbody>
                 </table>
             </div>
-
-
         </div>
-    )
-}
+    );
+};
 
 const AccountsView = ({ year, transactions, userId }) => {
     const [isAdding, setIsAdding] = useState(false);

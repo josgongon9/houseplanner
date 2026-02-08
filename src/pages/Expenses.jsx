@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '../context/StoreContext';
-import { Plus, ArrowLeft, DollarSign, TrendingUp, Calendar, User, ArrowRightLeft, Check, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Lock, Unlock, Grid, PieChart as PieChartIcon, Trash, Edit, Divide, Percent, Zap, Flame, Droplets, BarChart2, Home, Settings, Palette, GripVertical } from 'lucide-react';
+import { Plus, ArrowLeft, DollarSign, TrendingUp, Calendar, User, Users, ArrowRightLeft, Check, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Lock, Unlock, Grid, PieChart as PieChartIcon, Trash, Edit, Divide, Percent, Zap, Flame, Droplets, BarChart2, Home, Settings, Palette, GripVertical } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, subMonths, addMonths, isSameMonth, startOfYear, endOfYear, eachMonthOfInterval, isFuture, isPast, isThisMonth, addYears, subYears } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Brush } from 'recharts';
@@ -773,17 +773,20 @@ export default function Expenses() {
                                     const payer = householdMembers.find(m => m.id === exp.payerId);
                                     const isSettlement = exp.category === 'settlement';
 
+                                    const splitCount = (exp.splitAmong && exp.splitAmong.length > 0) ? exp.splitAmong.length : householdMembers.length;
+                                    const isIndividual = splitCount === 1;
+
                                     return (
                                         <div
                                             key={exp.id}
                                             onClick={() => handleEdit(exp)}
-                                            className={`p-4 rounded-xl border flex justify-between items-center shadow-sm cursor-pointer active:scale-[0.98] transition-transform ${isSettlement
+                                            className={`relative p-4 rounded-xl border flex justify-between items-center shadow-sm cursor-pointer active:scale-[0.98] transition-transform pb-6 ${isSettlement
                                                 ? 'bg-emerald-500/10 border-emerald-500/30'
                                                 : 'bg-surface border-slate-700 hover:border-slate-500'
                                                 }`}
                                         >
                                             <div className="flex items-center gap-3">
-                                                <div className={`p-3 rounded-xl ${exp.category === 'groceries' ? 'bg-orange-500/10 text-orange-400' :
+                                                <div className={`relative p-3 rounded-xl ${exp.category === 'groceries' ? 'bg-orange-500/10 text-orange-400' :
                                                     exp.category === 'dining' ? 'bg-blue-500/10 text-blue-400' :
                                                         exp.category === 'transport' ? 'bg-violet-500/10 text-violet-400' :
                                                             exp.category === 'home' ? 'bg-amber-500/10 text-amber-400' :
@@ -792,6 +795,8 @@ export default function Expenses() {
                                                     }`}>
                                                     {exp.category === 'settlement' ? <ArrowRightLeft size={16} /> :
                                                         categories.find(c => c.id === exp.category)?.icon || '📦'}
+
+
                                                 </div>
                                                 <div>
                                                     <h4 className={`font-bold text-base ${isSettlement ? 'text-emerald-400' : ''}`}>{exp.title}</h4>
@@ -805,6 +810,12 @@ export default function Expenses() {
                                             <div className={`${isSettlement ? 'text-emerald-400' : 'text-slate-200'} font-bold text-lg`}>
                                                 {exp.amount.toFixed(2)}€
                                             </div>
+
+                                            {!isSettlement && (
+                                                <div className={`absolute bottom-2 right-2 p-1.5 rounded-full ${isIndividual ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'}`} title={isIndividual ? "Gasto Individual" : "Gasto Compartido"}>
+                                                    {isIndividual ? <User size={12} strokeWidth={2.5} /> : <Users size={12} strokeWidth={2.5} />}
+                                                </div>
+                                            )}
                                         </div>
                                     )
                                 })
