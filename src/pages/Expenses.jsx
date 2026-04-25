@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useStore } from '../context/StoreContext';
-import { Plus, ArrowLeft, DollarSign, TrendingUp, Calendar, User, Users, ArrowRightLeft, Check, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Lock, Unlock, Grid, PieChart as PieChartIcon, Trash, Edit, Divide, Percent, Zap, Flame, Droplets, BarChart2, Home, Settings, Palette, GripVertical } from 'lucide-react';
+import { Plus, ArrowLeft, DollarSign, TrendingUp, Calendar, User, Users, ArrowRightLeft, Check, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Lock, Unlock, Grid, PieChart as PieChartIcon, Trash, Edit, Divide, Percent, Zap, Flame, Droplets, BarChart2, Home, Settings, Palette, GripVertical, Repeat, ToggleLeft, ToggleRight } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, subMonths, addMonths, isSameMonth, startOfYear, endOfYear, eachMonthOfInterval, isFuture, isPast, isThisMonth, addYears, subYears } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Brush } from 'recharts';
@@ -18,7 +18,7 @@ const DEFAULT_CATEGORIES = [
 ];
 
 export default function Expenses() {
-    const { expenses, addExpense, updateExpense, deleteExpense, householdMembers, user, household, addExpenseCategory, deleteExpenseCategory, updateAllExpenseCategories, updateHouseStatsCategories, updateHouseStatsPeriod, updateHouseStatsCategoryColor } = useStore();
+    const { expenses, addExpense, updateExpense, deleteExpense, recurringExpenses, addRecurringExpense, updateRecurringExpense, deleteRecurringExpense, generateRecurringExpenses, householdMembers, user, household, addExpenseCategory, deleteExpenseCategory, updateAllExpenseCategories, updateHouseStatsCategories, updateHouseStatsPeriod, updateHouseStatsCategoryColor } = useStore();
     const [viewMode, setViewMode] = useState('month'); // 'month' | 'year'
     const [activeTab, setActiveTab] = useState('expenses'); // 'expenses' | 'balances' | 'charts' | 'house'
     const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -46,6 +46,15 @@ export default function Expenses() {
     const [splitMode, setSplitMode] = useState('equal'); // 'equal' | 'custom'
     const [customAmounts, setCustomAmounts] = useState({}); // { uid: amount }
 
+    // Recurring Form State
+    const [isRecurring, setIsRecurring] = useState(false);
+    const [recurringStartMonth, setRecurringStartMonth] = useState('');
+    const [recurringEndMonth, setRecurringEndMonth] = useState(''); // '' = indefinido
+
+    // Recurring management state
+    const [editingRecurringId, setEditingRecurringId] = useState(null);
+    const [showRecurringForm, setShowRecurringForm] = useState(false);
+
     // New Category State
     const [newCatName, setNewCatName] = useState("");
     const [newCatIcon, setNewCatIcon] = useState("📦");
@@ -68,6 +77,9 @@ export default function Expenses() {
         setCategory("");
         setSplitMode('equal');
         setCustomAmounts({});
+        setIsRecurring(false);
+        setRecurringStartMonth(format(currentMonth, 'yyyy-MM'));
+        setRecurringEndMonth('');
         setShowAdd(true);
     }
 
@@ -81,6 +93,7 @@ export default function Expenses() {
         setSplitAmong(exp.splitAmong || []);
         setSplitMode(exp.splitMode || 'equal');
         setCustomAmounts(exp.customAmounts || {});
+        setIsRecurring(false); // When editing existing expense, don't show recurring toggle
         setShowAdd(true);
     }
 
@@ -110,14 +123,25 @@ export default function Expenses() {
         if (editingId) {
             await updateExpense(editingId, data);
         } else {
-            // Use currentMonth but preserve today's day/time if we are in the current month
-            let expenseDate = new Date().toISOString();
-            if (!isThisMonth(currentMonth)) {
-                // If we are in another month, use the 1st of that month at noon to avoid timezone issues
-                const targetDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1, 12, 0, 0);
-                expenseDate = targetDate.toISOString();
+            // If recurring, create the rule AND the current month expense
+            if (isRecurring) {
+                await addRecurringExpense({
+                    ...data,
+                    startMonth: recurringStartMonth,
+                    endMonth: recurringEndMonth || null
+                });
+                // The generation will happen via useEffect or we can generate now
+                await generateRecurringExpenses(currentMonth);
+            } else {
+                // Use currentMonth but preserve today's day/time if we are in the current month
+                let expenseDate = new Date().toISOString();
+                if (!isThisMonth(currentMonth)) {
+                    // If we are in another month, use the 1st of that month at noon to avoid timezone issues
+                    const targetDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1, 12, 0, 0);
+                    expenseDate = targetDate.toISOString();
+                }
+                await addExpense(data.title, data.amount, data.category, data.payerId, data.splitAmong, data.splitMode, data.customAmounts, expenseDate);
             }
-            await addExpense(data.title, data.amount, data.category, data.payerId, data.splitAmong, data.splitMode, data.customAmounts, expenseDate);
         }
         setShowAdd(false);
         setEditingId(null);
@@ -414,6 +438,13 @@ export default function Expenses() {
         return totals;
     }, [yearUtilityData, statsCategoryIds]);
 
+    // Auto-generate recurring expenses when month changes
+    useEffect(() => {
+        if (viewMode === 'month' && generateRecurringExpenses) {
+            generateRecurringExpenses(currentMonth);
+        }
+    }, [currentMonth, viewMode]);
+
     return (
         <div className="p-4 space-y-4 pb-24">
 
@@ -569,6 +600,12 @@ export default function Expenses() {
                             >
                                 Saldos {transactions.length > 0 && <span className="ml-1 w-2 h-2 bg-red-500 rounded-full inline-block"></span>}
                             </button>
+                            <button
+                                onClick={() => setActiveTab('recurring')}
+                                className={`flex-1 py-1.5 text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-1 ${activeTab === 'recurring' ? 'bg-violet-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                            >
+                                <Repeat size={14} /> {recurringExpenses.length > 0 && <span className="text-[10px]">({recurringExpenses.length})</span>}
+                            </button>
                         </div>
                     )}
 
@@ -718,15 +755,67 @@ export default function Expenses() {
                                         </div>
                                     )}
 
+                                    {/* Recurring Expense Toggle (only for new expenses) */}
+                                    {!editingId && (
+                                        <div className="space-y-3">
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsRecurring(!isRecurring)}
+                                                className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all ${isRecurring
+                                                    ? 'bg-violet-500/10 border-violet-500/50 text-violet-400'
+                                                    : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'
+                                                    }`}
+                                            >
+                                                <div className="flex items-center gap-2">
+                                                    <Repeat size={18} />
+                                                    <span className="text-sm font-bold">Gasto Recurrente</span>
+                                                </div>
+                                                {isRecurring
+                                                    ? <ToggleRight size={24} className="text-violet-400" />
+                                                    : <ToggleLeft size={24} className="text-slate-600" />
+                                                }
+                                            </button>
+
+                                            {isRecurring && (
+                                                <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-4 space-y-3 animate-in slide-in-from-top-2">
+                                                    <p className="text-xs text-violet-300/70">Este gasto se generará automáticamente cada mes dentro del rango que establezcas.</p>
+                                                    <div className="grid grid-cols-2 gap-3">
+                                                        <div>
+                                                            <label className="block text-xs font-medium text-slate-400 mb-1">Desde *</label>
+                                                            <input
+                                                                type="month"
+                                                                required
+                                                                value={recurringStartMonth}
+                                                                onChange={(e) => setRecurringStartMonth(e.target.value)}
+                                                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm outline-none focus:border-violet-500"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-xs font-medium text-slate-400 mb-1">Hasta <span className="text-slate-600">(vacío = indefinido)</span></label>
+                                                            <input
+                                                                type="month"
+                                                                value={recurringEndMonth}
+                                                                onChange={(e) => setRecurringEndMonth(e.target.value)}
+                                                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm outline-none focus:border-violet-500"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
                                     <button
                                         type="submit"
                                         disabled={splitMode === 'custom' && !isValidCustom}
                                         className={`w-full font-bold py-3 rounded-xl transition-all shadow-lg ${splitMode === 'custom' && !isValidCustom
                                             ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                                            : 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-emerald-500/20'
+                                            : isRecurring
+                                                ? 'bg-violet-500 text-white hover:bg-violet-600 shadow-violet-500/20'
+                                                : 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-emerald-500/20'
                                             }`}
                                     >
-                                        {editingId ? 'Guardar Cambios' : 'Guardar Gasto'}
+                                        {editingId ? 'Guardar Cambios' : isRecurring ? '🔄 Crear Gasto Recurrente' : 'Guardar Gasto'}
                                     </button>
 
                                     {editingId && (
@@ -812,8 +901,15 @@ export default function Expenses() {
                                             </div>
 
                                             {!isSettlement && (
-                                                <div className={`absolute bottom-2 right-2 p-1.5 rounded-full ${isIndividual ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'}`} title={isIndividual ? "Gasto Individual" : "Gasto Compartido"}>
-                                                    {isIndividual ? <User size={12} strokeWidth={2.5} /> : <Users size={12} strokeWidth={2.5} />}
+                                                <div className="absolute bottom-2 right-2 flex items-center gap-1">
+                                                    {exp.recurringId && (
+                                                        <div className="p-1.5 rounded-full bg-violet-500/10 text-violet-400 border border-violet-500/20" title="Gasto Recurrente">
+                                                            <Repeat size={12} strokeWidth={2.5} />
+                                                        </div>
+                                                    )}
+                                                    <div className={`p-1.5 rounded-full ${isIndividual ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'}`} title={isIndividual ? "Gasto Individual" : "Gasto Compartido"}>
+                                                        {isIndividual ? <User size={12} strokeWidth={2.5} /> : <Users size={12} strokeWidth={2.5} />}
+                                                    </div>
                                                 </div>
                                             )}
                                         </div>
@@ -847,17 +943,22 @@ export default function Expenses() {
                                                         data={chartData}
                                                         cx="50%"
                                                         cy="50%"
-                                                        innerRadius={60}
+                                                        innerRadius={55}
                                                         outerRadius={80}
-                                                        paddingAngle={5}
+                                                        paddingAngle={3}
                                                         dataKey="value"
+                                                        label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`}
+                                                        labelLine={true}
                                                     >
                                                         {chartData.map((entry, index) => (
                                                             <Cell key={`cell-${index}`} fill={entry.color} stroke="rgba(0,0,0,0)" />
                                                         ))}
                                                     </Pie>
                                                     <RechartsTooltip
-                                                        formatter={(value) => `${value.toFixed(2)}€`}
+                                                        formatter={(value, name, props) => [
+                                                            `${value.toFixed(2)}€ (${((value / totalMonthly) * 100).toFixed(1)}%)`,
+                                                            name
+                                                        ]}
                                                         contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '12px', color: '#fff' }}
                                                         itemStyle={{ color: '#fff' }}
                                                     />
@@ -898,17 +999,22 @@ export default function Expenses() {
                                                         data={individualChartData}
                                                         cx="50%"
                                                         cy="50%"
-                                                        innerRadius={60}
+                                                        innerRadius={55}
                                                         outerRadius={80}
-                                                        paddingAngle={5}
+                                                        paddingAngle={3}
                                                         dataKey="value"
+                                                        label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`}
+                                                        labelLine={true}
                                                     >
                                                         {individualChartData.map((entry, index) => (
                                                             <Cell key={`cell-${index}`} fill={entry.color} stroke="rgba(0,0,0,0)" />
                                                         ))}
                                                     </Pie>
                                                     <RechartsTooltip
-                                                        formatter={(value) => `${value.toFixed(2)}€`}
+                                                        formatter={(value, name, props) => [
+                                                            `${value.toFixed(2)}€ (${((value / totalMonthly) * 100).toFixed(1)}%)`,
+                                                            name
+                                                        ]}
                                                         contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '12px', color: '#fff' }}
                                                         itemStyle={{ color: '#fff' }}
                                                     />
@@ -1423,6 +1529,273 @@ export default function Expenses() {
                                     ))
                                 )}
                             </div>
+                        </div>
+                    )}
+
+                    {/* === RECURRING EXPENSES VIEW === */}
+                    {activeTab === 'recurring' && (
+                        <div className="space-y-4 animate-in slide-in-from-right-4">
+                            <div className="flex justify-between items-center">
+                                <h3 className="font-bold text-lg text-violet-400 flex items-center gap-2">
+                                    <Repeat size={20} /> Gastos Recurrentes
+                                </h3>
+                                <button
+                                    onClick={() => {
+                                        setEditingRecurringId(null);
+                                        setTitle("");
+                                        setAmount("");
+                                        setCategory("");
+                                        setPayerId(user.uid);
+                                        setSplitAmong(householdMembers.map(m => m.id));
+                                        setSplitMode('equal');
+                                        setCustomAmounts({});
+                                        setRecurringStartMonth(format(currentMonth, 'yyyy-MM'));
+                                        setRecurringEndMonth('');
+                                        setShowRecurringForm(!showRecurringForm);
+                                    }}
+                                    className={`px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 transition-all ${showRecurringForm ? 'bg-slate-800 text-slate-300' : 'bg-violet-500 text-white'}`}
+                                >
+                                    {showRecurringForm ? <><X size={16} /> Cancelar</> : <><Plus size={16} /> Nuevo</>}
+                                </button>
+                            </div>
+
+                            {/* Add/Edit Recurring Form */}
+                            {showRecurringForm && (
+                                <form
+                                    onSubmit={async (e) => {
+                                        e.preventDefault();
+                                        if (!title || !amount || !category || !recurringStartMonth) return;
+
+                                        const data = {
+                                            title,
+                                            amount: Number(amount),
+                                            category,
+                                            payerId,
+                                            splitAmong,
+                                            splitMode,
+                                            customAmounts: splitMode === 'custom' ? customAmounts : {},
+                                            startMonth: recurringStartMonth,
+                                            endMonth: recurringEndMonth || null
+                                        };
+
+                                        if (editingRecurringId) {
+                                            await updateRecurringExpense(editingRecurringId, data);
+                                        } else {
+                                            await addRecurringExpense(data);
+                                            // Generate for current month immediately
+                                            await generateRecurringExpenses(currentMonth);
+                                        }
+                                        setShowRecurringForm(false);
+                                        setEditingRecurringId(null);
+                                    }}
+                                    className="bg-violet-500/5 border border-violet-500/20 rounded-2xl p-5 space-y-4 animate-in slide-in-from-top-4"
+                                >
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-400 mb-1">Concepto *</label>
+                                            <input
+                                                value={title} onChange={e => setTitle(e.target.value)}
+                                                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-violet-500 text-sm"
+                                                placeholder="Ej. Alquiler" required
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-400 mb-1">Importe (€) *</label>
+                                            <input
+                                                type="number" step="0.01" min="0.01"
+                                                value={amount} onChange={e => setAmount(sanitizeAmount(e.target.value))}
+                                                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-violet-500 text-sm font-bold"
+                                                placeholder="0.00" required
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-400 mb-1">Categoría *</label>
+                                        <select
+                                            className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-violet-500 text-sm cursor-pointer"
+                                            value={category} onChange={e => setCategory(e.target.value)} required
+                                        >
+                                            <option value="" disabled>Selecciona una categoría</option>
+                                            {categories.map(cat => (
+                                                <option key={cat.id} value={cat.id}>{cat.icon} {cat.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-400 mb-1">Desde *</label>
+                                            <input
+                                                type="month" required
+                                                value={recurringStartMonth}
+                                                onChange={(e) => setRecurringStartMonth(e.target.value)}
+                                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm outline-none focus:border-violet-500"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-400 mb-1">Hasta <span className="text-slate-600">(vacío = ∞)</span></label>
+                                            <input
+                                                type="month"
+                                                value={recurringEndMonth}
+                                                onChange={(e) => setRecurringEndMonth(e.target.value)}
+                                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm outline-none focus:border-violet-500"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Payer */}
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-400 mb-1">Pagado por</label>
+                                        <div className="bg-slate-900 border border-slate-700 rounded-xl p-2 flex gap-2 overflow-x-auto">
+                                            {householdMembers.map(m => (
+                                                <button
+                                                    type="button" key={m.id}
+                                                    onClick={() => setPayerId(m.id)}
+                                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors whitespace-nowrap border ${payerId === m.id ? 'bg-violet-500/20 text-violet-400 border-violet-500/50' : 'bg-transparent text-slate-400 border-transparent hover:bg-slate-800'}`}
+                                                >
+                                                    <Avatar url={m.photoURL} name={m.displayName} size="xs" />
+                                                    <span className="text-sm font-medium">{m.displayName?.split(' ')[0]}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Split Among */}
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-400 mb-1">Para quién</label>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {householdMembers.map(m => {
+                                                const isSelected = splitAmong.includes(m.id);
+                                                return (
+                                                    <button
+                                                        type="button" key={m.id}
+                                                        onClick={() => toggleSplitMember(m.id)}
+                                                        className={`flex items-center justify-between p-2.5 rounded-xl border transition-all text-sm ${isSelected ? 'bg-slate-800 border-violet-500/50 text-white' : 'bg-slate-900 border-slate-800 text-slate-500 opacity-70'}`}
+                                                    >
+                                                        <div className="flex items-center gap-2">
+                                                            <Avatar url={m.photoURL} name={m.displayName} size="xs" />
+                                                            <span>{m.displayName?.split(' ')[0]}</span>
+                                                        </div>
+                                                        {isSelected && <Check size={14} className="text-violet-400" />}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        type="submit"
+                                        className="w-full bg-violet-500 hover:bg-violet-600 text-white font-bold py-3 rounded-xl transition-colors shadow-lg shadow-violet-500/20"
+                                    >
+                                        {editingRecurringId ? 'Actualizar Regla' : '🔄 Crear Recurrente'}
+                                    </button>
+                                </form>
+                            )}
+
+                            {/* Rules List */}
+                            {recurringExpenses.length === 0 && !showRecurringForm ? (
+                                <div className="text-center py-16 opacity-50 space-y-4">
+                                    <div className="bg-slate-800 w-20 h-20 rounded-full flex items-center justify-center mx-auto text-slate-600">
+                                        <Repeat size={40} />
+                                    </div>
+                                    <p className="text-slate-400">No tienes gastos recurrentes configurados.</p>
+                                    <p className="text-xs text-slate-500">Crea uno para que se genere automáticamente cada mes.</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    {recurringExpenses.map(rule => {
+                                        const cat = categories.find(c => c.id === rule.category);
+                                        const payer = householdMembers.find(m => m.id === rule.payerId);
+                                        const splitCount = rule.splitAmong?.length || householdMembers.length;
+                                        const isIndividual = splitCount === 1;
+
+                                        return (
+                                            <div
+                                                key={rule.id}
+                                                className={`relative p-4 rounded-2xl border transition-all ${rule.active !== false
+                                                    ? 'bg-surface border-slate-700 hover:border-violet-500/30'
+                                                    : 'bg-slate-900/30 border-slate-800 opacity-60'
+                                                    }`}
+                                            >
+                                                <div className="flex justify-between items-start gap-3">
+                                                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                                                        <div className="p-2.5 rounded-xl text-lg shrink-0" style={{ backgroundColor: `${cat?.color || '#64748B'}15` }}>
+                                                            {cat?.icon || '📦'}
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="font-bold text-white truncate">{rule.title}</div>
+                                                            <div className="text-xs text-slate-400 flex flex-wrap gap-1.5 mt-1 items-center">
+                                                                <span className="bg-slate-800 px-1.5 py-0.5 rounded">{cat?.name || 'Otro'}</span>
+                                                                <span>•</span>
+                                                                <span>Paga {payer?.displayName?.split(' ')[0] || '???'}</span>
+                                                                <span>•</span>
+                                                                <span className="flex items-center gap-0.5">
+                                                                    {isIndividual ? <User size={10} /> : <Users size={10} />}
+                                                                    {splitCount} {splitCount === 1 ? 'persona' : 'personas'}
+                                                                </span>
+                                                            </div>
+                                                            <div className="text-[10px] text-violet-400/70 mt-1.5 flex items-center gap-1 font-medium">
+                                                                <Calendar size={10} />
+                                                                {rule.startMonth}
+                                                                <span className="text-slate-600">→</span>
+                                                                {rule.endMonth || '∞ Indefinido'}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="text-right shrink-0">
+                                                        <div className="text-lg font-bold text-white">{Number(rule.amount).toFixed(2)}€</div>
+                                                        <div className="text-[10px] text-slate-500 font-bold uppercase mt-0.5">/ mes</div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-800">
+                                                    <button
+                                                        onClick={() => {
+                                                            setEditingRecurringId(rule.id);
+                                                            setTitle(rule.title);
+                                                            setAmount(rule.amount);
+                                                            setCategory(rule.category);
+                                                            setPayerId(rule.payerId);
+                                                            setSplitAmong(rule.splitAmong || []);
+                                                            setSplitMode(rule.splitMode || 'equal');
+                                                            setCustomAmounts(rule.customAmounts || {});
+                                                            setRecurringStartMonth(rule.startMonth);
+                                                            setRecurringEndMonth(rule.endMonth || '');
+                                                            setShowRecurringForm(true);
+                                                        }}
+                                                        className="flex-1 py-2 text-xs font-bold text-slate-400 hover:text-violet-400 hover:bg-violet-500/10 rounded-lg transition-colors flex items-center justify-center gap-1"
+                                                    >
+                                                        <Edit size={14} /> Editar
+                                                    </button>
+                                                    <button
+                                                        onClick={async () => {
+                                                            await updateRecurringExpense(rule.id, { active: rule.active === false ? true : false });
+                                                        }}
+                                                        className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-1 ${rule.active !== false
+                                                            ? 'text-amber-400 hover:bg-amber-500/10'
+                                                            : 'text-emerald-400 hover:bg-emerald-500/10'
+                                                            }`}
+                                                    >
+                                                        {rule.active !== false ? <><ToggleRight size={14} /> Pausar</> : <><ToggleLeft size={14} /> Activar</>}
+                                                    </button>
+                                                    <button
+                                                        onClick={async () => {
+                                                            if (confirm(`¿Eliminar la regla recurrente "${rule.title}"? Los gastos ya generados no se eliminarán.`)) {
+                                                                await deleteRecurringExpense(rule.id);
+                                                            }
+                                                        }}
+                                                        className="flex-1 py-2 text-xs font-bold text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors flex items-center justify-center gap-1"
+                                                    >
+                                                        <Trash size={14} /> Eliminar
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </div>
                     )}
                 </>

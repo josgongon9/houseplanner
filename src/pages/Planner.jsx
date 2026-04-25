@@ -458,7 +458,8 @@ export default function Planner() {
 
                             {/* Filtered Meals List */}
                             <div className="space-y-2">
-                                {meals
+                                {[...meals]
+                                    .sort((a, b) => a.name.localeCompare(b.name, 'es'))
                                     .filter(meal => {
                                         // Search filter
                                         const matchesSearch = meal.name.toLowerCase().includes(searchQuery.toLowerCase());

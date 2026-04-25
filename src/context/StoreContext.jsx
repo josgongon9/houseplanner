@@ -20,6 +20,7 @@ export const StoreProvider = ({ children }) => {
     const [meals, setMeals] = useState([]);
     const [menu, setMenu] = useState({});
     const [expenses, setExpenses] = useState([]); // New Module
+    const [recurringExpenses, setRecurringExpenses] = useState([]); // Recurring expense rules
 
     const [isLoading, setIsLoading] = useState(true);
 
@@ -40,6 +41,7 @@ export const StoreProvider = ({ children }) => {
                 setMeals([]);
                 setMenu({});
                 setExpenses([]);
+                setRecurringExpenses([]);
                 setUserRole(null);
                 setIsLoading(false);
                 if (userListenerRef.current) userListenerRef.current();
@@ -129,6 +131,11 @@ export const StoreProvider = ({ children }) => {
             setExpenses(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
         });
 
+        // C2. Recurring Expenses
+        const qRecurring = query(collection(db, "recurringExpenses"), where("householdId", "==", household.id));
+        const unsubRecurring = onSnapshot(qRecurring, (snapshot) => {
+            setRecurringExpenses(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+        });
 
         // D. Household Members (Fetch profiles)
         const qMembers = query(collection(db, "users"), where("householdId", "==", household.id));
@@ -145,6 +152,7 @@ export const StoreProvider = ({ children }) => {
             unsubMeals();
             unsubMenu();
             unsubExpenses();
+            unsubRecurring();
             unsubMembers();
         };
     }, [household]); // Re-run if household changes
@@ -408,6 +416,96 @@ export const StoreProvider = ({ children }) => {
         await deleteDoc(doc(db, "expenses", id));
     }
 
+    // Recurring Expenses Actions
+    const addRecurringExpense = async (data) => {
+        if (!user || !household) return;
+        const recDoc = await addDoc(collection(db, "recurringExpenses"), {
+            title: data.title,
+            amount: Number(data.amount),
+            category: data.category,
+            payerId: data.payerId || user.uid,
+            splitAmong: data.splitAmong || [],
+            splitMode: data.splitMode || 'equal',
+            customAmounts: data.customAmounts || {},
+            householdId: household.id,
+            startMonth: data.startMonth, // 'YYYY-MM'
+            endMonth: data.endMonth || null, // 'YYYY-MM' or null for indefinite
+            active: true,
+            createdAt: new Date().toISOString(),
+            createdBy: user.uid
+        });
+        return recDoc.id;
+    };
+
+    const updateRecurringExpense = async (id, data) => {
+        if (!user || !household) return;
+        const payload = { ...data };
+        if (payload.amount) payload.amount = Number(payload.amount);
+        await updateDoc(doc(db, "recurringExpenses", id), payload);
+    };
+
+    const deleteRecurringExpense = async (id) => {
+        if (!user || !household) return;
+        await deleteDoc(doc(db, "recurringExpenses", id));
+    };
+
+    const generateRecurringExpenses = async (monthDate) => {
+        if (!user || !household) return;
+
+        const monthKey = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}`;
+
+        // Get current recurring rules
+        const rulesSnap = await getDocs(query(
+            collection(db, "recurringExpenses"),
+            where("householdId", "==", household.id),
+            where("active", "==", true)
+        ));
+
+        const rules = rulesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        // Get existing expenses for this month that were generated from recurring
+        const existingSnap = await getDocs(query(
+            collection(db, "expenses"),
+            where("householdId", "==", household.id)
+        ));
+
+        const existingRecurring = existingSnap.docs
+            .map(d => d.data())
+            .filter(e => e.recurringId && e.recurringMonth === monthKey);
+
+        const existingRecurringIds = new Set(existingRecurring.map(e => e.recurringId));
+
+        let generated = 0;
+        for (const rule of rules) {
+            // Check if this rule applies to the month
+            if (rule.startMonth > monthKey) continue; // Not started yet
+            if (rule.endMonth && rule.endMonth < monthKey) continue; // Already ended
+            if (existingRecurringIds.has(rule.id)) continue; // Already generated
+
+            // Generate the expense for this month (set date to 1st of month at noon)
+            const expenseDate = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1, 12, 0, 0);
+
+            await addDoc(collection(db, "expenses"), {
+                title: rule.title,
+                amount: Number(rule.amount),
+                category: rule.category,
+                date: expenseDate.toISOString(),
+                householdId: household.id,
+                payerId: rule.payerId,
+                splitAmong: rule.splitAmong,
+                splitMode: rule.splitMode || 'equal',
+                customAmounts: rule.customAmounts || {},
+                recurringId: rule.id,
+                recurringMonth: monthKey
+            });
+            generated++;
+        }
+
+        if (generated > 0) {
+            console.log(`🔄 Generados ${generated} gastos recurrentes para ${monthKey}`);
+        }
+    };
+
     const addExpenseCategory = async (name, icon) => {
         if (!user || !household) return;
         const newCategory = {
@@ -572,8 +670,9 @@ export const StoreProvider = ({ children }) => {
         <StoreContext.Provider value={{
             user, userData, userRole, household, householdMembers, login, logout,
             createHousehold, joinHousehold,
-            meals, menu, expenses,
+            meals, menu, expenses, recurringExpenses,
             addMeal, updateMealStock, updateMeal, deleteMeal, setMenuItem, addExpense, updateExpense, deleteExpense,
+            addRecurringExpense, updateRecurringExpense, deleteRecurringExpense, generateRecurringExpenses,
             addExpenseCategory, deleteExpenseCategory, updateAllExpenseCategories, updateHouseStatsCategories, updateHouseStatsPeriod, updateHouseStatsCategoryColor,
             // User Actions
             switchHousehold, leaveHousehold, removeMember,

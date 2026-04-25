@@ -524,17 +524,22 @@ const BudgetView = ({ year, data, onUpdate, pieData, totals }) => {
                                 data={pieData}
                                 cx="50%"
                                 cy="50%"
-                                innerRadius={60}
+                                innerRadius={55}
                                 outerRadius={80}
-                                paddingAngle={5}
+                                paddingAngle={3}
                                 dataKey="value"
+                                label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`}
+                                labelLine={true}
                             >
                                 {pieData.map((entry, index) => (
                                     <Cell key={`cell-${index}`} fill={entry.color} />
                                 ))}
                             </Pie>
                             <RechartsTooltip
-                                formatter={(val) => `${val.toFixed(2)}€`}
+                                formatter={(val, name) => [
+                                    `${val.toFixed(2)}€ (${(totals.income + totals.expense) > 0 ? ((val / (totals.income + totals.expense)) * 100).toFixed(1) : 0}%)`,
+                                    name
+                                ]}
                                 contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155' }}
                             />
                             <Legend />
@@ -696,7 +701,7 @@ const InvestmentsView = ({ year, stocks, dividends, userId }) => {
                         if (!monthly[newMonth].incomes) monthly[newMonth].incomes = {};
 
                         const currentVal = Number(monthly[newMonth].incomes["Acciones"] || 0);
-                        monthly[newMonth].incomes["Acciones"] = currentVal + profit;
+                        monthly[newMonth].incomes["Acciones"] = Math.round((currentVal + profit) * 100) / 100;
 
                         transaction.update(financeDocRef, { monthly });
                     });
@@ -744,7 +749,7 @@ const InvestmentsView = ({ year, stocks, dividends, userId }) => {
 
                     // Add profit to existing value (accummulate)
                     const currentVal = Number(monthly[saleMonth].incomes["Acciones"] || 0);
-                    monthly[saleMonth].incomes["Acciones"] = currentVal + profit;
+                    monthly[saleMonth].incomes["Acciones"] = Math.round((currentVal + profit) * 100) / 100;
 
                     transaction.update(financeDocRef, {
                         incomeCategories,
