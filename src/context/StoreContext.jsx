@@ -583,6 +583,13 @@ export const StoreProvider = ({ children }) => {
         });
     };
 
+    const updateHouseStatsPersons = async (personIds) => {
+        if (!user || !household) return;
+        await updateDoc(doc(db, "households", household.id), {
+            houseStatsPersons: personIds
+        });
+    };
+
     // Admin Actions
     const adminAddUserToHousehold = async (userId, householdId) => {
         if (!user || userRole !== 'admin') return;
@@ -673,7 +680,7 @@ export const StoreProvider = ({ children }) => {
             meals, menu, expenses, recurringExpenses,
             addMeal, updateMealStock, updateMeal, deleteMeal, setMenuItem, addExpense, updateExpense, deleteExpense,
             addRecurringExpense, updateRecurringExpense, deleteRecurringExpense, generateRecurringExpenses,
-            addExpenseCategory, deleteExpenseCategory, updateAllExpenseCategories, updateHouseStatsCategories, updateHouseStatsPeriod, updateHouseStatsCategoryColor,
+            addExpenseCategory, deleteExpenseCategory, updateAllExpenseCategories, updateHouseStatsCategories, updateHouseStatsPeriod, updateHouseStatsCategoryColor, updateHouseStatsPersons,
             // User Actions
             switchHousehold, leaveHousehold, removeMember,
             // Admin exports

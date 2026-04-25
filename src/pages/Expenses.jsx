@@ -18,7 +18,7 @@ const DEFAULT_CATEGORIES = [
 ];
 
 export default function Expenses() {
-    const { expenses, addExpense, updateExpense, deleteExpense, recurringExpenses, addRecurringExpense, updateRecurringExpense, deleteRecurringExpense, generateRecurringExpenses, householdMembers, user, household, addExpenseCategory, deleteExpenseCategory, updateAllExpenseCategories, updateHouseStatsCategories, updateHouseStatsPeriod, updateHouseStatsCategoryColor } = useStore();
+    const { expenses, addExpense, updateExpense, deleteExpense, recurringExpenses, addRecurringExpense, updateRecurringExpense, deleteRecurringExpense, generateRecurringExpenses, householdMembers, user, household, addExpenseCategory, deleteExpenseCategory, updateAllExpenseCategories, updateHouseStatsCategories, updateHouseStatsPeriod, updateHouseStatsCategoryColor, updateHouseStatsPersons } = useStore();
     const [viewMode, setViewMode] = useState('month'); // 'month' | 'year'
     const [activeTab, setActiveTab] = useState('expenses'); // 'expenses' | 'balances' | 'charts' | 'house'
     const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -66,6 +66,42 @@ export default function Expenses() {
     const monthlyExpenses = useMemo(() => {
         return expenses.filter(exp => isSameMonth(parseISO(exp.date), currentMonth));
     }, [expenses, currentMonth]);
+
+    // Person filter state — by default show current user's expenses (individual + shared)
+    const [selectedPersons, setSelectedPersons] = useState(() => user ? [user.uid] : []);
+
+    // Toggle a person in the filter
+    const togglePersonFilter = (uid) => {
+        setSelectedPersons(prev => {
+            if (prev.includes(uid)) {
+                // Allow deselecting all — this shows only shared expenses
+                return prev.filter(id => id !== uid);
+            } else {
+                return [...prev, uid];
+            }
+        });
+    };
+
+    // Filter monthly expenses by selected persons
+    // An expense is visible if:
+    // - It's shared (splitAmong has more than 1 person from the household)
+    // - OR any of the selectedPersons is in its splitAmong (individual expense of a selected person)
+    const filteredMonthlyExpenses = useMemo(() => {
+        if (selectedPersons.length === 0) {
+            // No person selected = show only shared expenses (splitAmong > 1)
+            return monthlyExpenses.filter(exp => {
+                const split = exp.splitAmong || [];
+                return split.length !== 1;
+            });
+        }
+        return monthlyExpenses.filter(exp => {
+            const split = exp.splitAmong || [];
+            // Shared expense (multiple people) — always show
+            if (split.length !== 1) return true;
+            // Individual expense — show only if that person is selected
+            return selectedPersons.some(uid => split.includes(uid));
+        });
+    }, [monthlyExpenses, selectedPersons]);
 
     // Handle opening modal for CREATE
     const handleOpenAdd = () => {
@@ -273,7 +309,7 @@ export default function Expenses() {
         return debtList;
     }, [balances]);
 
-    const totalMonthly = monthlyExpenses
+    const totalMonthly = filteredMonthlyExpenses
         .filter(e => e.category !== 'settlement')
         .reduce((acc, curr) => acc + Number(curr.amount), 0);
 
@@ -296,7 +332,7 @@ export default function Expenses() {
         const expenseMap = {};
         householdMembers.forEach(m => expenseMap[m.id] = 0);
 
-        monthlyExpenses.forEach(exp => {
+        filteredMonthlyExpenses.forEach(exp => {
             if (exp.category === 'settlement') return;
 
             let splitAmong = exp.splitAmong || [];
@@ -334,7 +370,7 @@ export default function Expenses() {
             amount,
             member: householdMembers.find(m => m.id === uid)
         })).sort((a, b) => b.amount - a.amount);
-    }, [monthlyExpenses, householdMembers]);
+    }, [filteredMonthlyExpenses, householdMembers]);
 
     const individualChartData = useMemo(() => {
         const colors = ['#10B981', '#3B82F6', '#F59E0B', '#F97316', '#8B5CF6', '#EC4899'];
@@ -353,7 +389,7 @@ export default function Expenses() {
             if (c.id !== 'settlement') data[c.id] = 0;
         });
 
-        monthlyExpenses.forEach(e => {
+        filteredMonthlyExpenses.forEach(e => {
             if (e.category === 'settlement') return;
             if (data[e.category] !== undefined) {
                 data[e.category] += Number(e.amount);
@@ -371,7 +407,7 @@ export default function Expenses() {
                 color: c.color
             }))
             .sort((a, b) => b.value - a.value);
-    }, [monthlyExpenses, categories]);
+    }, [filteredMonthlyExpenses, categories]);
 
     const statsCategoryIds = useMemo(() => {
         return household?.houseStatsCategories || ['LUZ', 'AGUA', 'GAS'];
@@ -401,8 +437,22 @@ export default function Expenses() {
 
         const monthsInInterval = eachMonthOfInterval({ start, end });
 
+        const statsPersonIds = household?.houseStatsPersons || [];
+
         return monthsInInterval.map(m => {
-            const mExpenses = expenses.filter(e => isSameMonth(parseISO(e.date), m));
+            const mExpensesAll = expenses.filter(e => isSameMonth(parseISO(e.date), m));
+            
+            // Filter by selected persons (if any are selected)
+            // Empty array means show everyone
+            const mExpenses = statsPersonIds.length === 0 
+                ? mExpensesAll 
+                : mExpensesAll.filter(exp => {
+                    const split = exp.splitAmong || [];
+                    // Show shared expenses (split among multiple people) or individual expenses of selected persons
+                    if (split.length !== 1) return true;
+                    return statsPersonIds.some(uid => split.includes(uid));
+                });
+
             const monthData = {
                 name: format(m, 'MMM', { locale: es }).toUpperCase(),
                 selectedTotal: 0,
@@ -586,7 +636,7 @@ export default function Expenses() {
                                 onClick={() => setActiveTab('expenses')}
                                 className={`flex-1 py-1.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'expenses' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                             >
-                                Listado ({monthlyExpenses.length})
+                                Listado ({filteredMonthlyExpenses.length})
                             </button>
                             <button
                                 onClick={() => setActiveTab('charts')}
@@ -835,30 +885,45 @@ export default function Expenses() {
                     {/* === LIST VIEW === */}
                     {activeTab === 'expenses' && (
                         <div className="space-y-4 animate-in slide-in-from-right-4">
-                            {/* Individual Summary Row */}
+                            {/* Individual Summary Row (Filters) */}
                             {monthlyExpenses.length > 0 && (
                                 <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-                                    {individualPaid.map(p => (
-                                        <div key={p.uid} className="bg-surface border border-slate-700 rounded-xl p-2 px-3 flex items-center gap-2 shrink-0 shadow-sm">
-                                            <Avatar url={p.member?.photoURL} name={p.member?.displayName} size="xs" />
-                                            <div className="flex flex-col">
-                                                <span className="text-[10px] text-slate-500 font-bold uppercase leading-none">{p.member?.displayName?.split(' ')[0]}</span>
-                                                <span className="text-sm font-bold text-white leading-none mt-1">{p.amount.toFixed(2)}€</span>
-                                            </div>
+                                    <button
+                                        onClick={() => setSelectedPersons([])}
+                                        className={`border rounded-xl p-2 px-3 flex items-center gap-2 shrink-0 transition-all ${selectedPersons.length === 0 ? 'bg-emerald-500/20 border-emerald-500 text-white' : 'bg-surface border-slate-700 text-slate-400 hover:border-slate-500'}`}
+                                    >
+                                        <div className="flex flex-col items-center">
+                                            <span className="text-[10px] font-bold uppercase leading-none">Solo Común</span>
                                         </div>
-                                    ))}
+                                    </button>
+                                    {individualPaid.map(p => {
+                                        const isSelected = selectedPersons.includes(p.uid);
+                                        return (
+                                            <button
+                                                key={p.uid}
+                                                onClick={() => togglePersonFilter(p.uid)}
+                                                className={`border rounded-xl p-2 px-3 flex items-center gap-2 shrink-0 transition-all ${isSelected ? 'bg-emerald-500/20 border-emerald-500 shadow-sm' : 'bg-surface border-slate-700 hover:border-slate-500 opacity-60 grayscale'}`}
+                                            >
+                                                <Avatar url={p.member?.photoURL} name={p.member?.displayName} size="xs" />
+                                                <div className="flex flex-col items-start">
+                                                    <span className={`text-[10px] font-bold uppercase leading-none ${isSelected ? 'text-emerald-400' : 'text-slate-500'}`}>{p.member?.displayName?.split(' ')[0]}</span>
+                                                    <span className={`text-sm font-bold leading-none mt-1 ${isSelected ? 'text-white' : 'text-slate-400'}`}>{p.amount.toFixed(2)}€</span>
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                             )}
 
-                            {monthlyExpenses.length === 0 ? (
+                            {filteredMonthlyExpenses.length === 0 ? (
                                 <div className="text-center py-20 opacity-50 space-y-4">
                                     <div className="bg-slate-800 w-20 h-20 rounded-full flex items-center justify-center mx-auto text-slate-600">
                                         <Calendar size={40} />
                                     </div>
-                                    <p>No hay gastos en {format(currentMonth, 'MMMM', { locale: es })}.</p>
+                                    <p>No hay gastos para mostrar.</p>
                                 </div>
                             ) : (
-                                monthlyExpenses.map(exp => {
+                                filteredMonthlyExpenses.map(exp => {
                                     const payer = householdMembers.find(m => m.id === exp.payerId);
                                     const isSettlement = exp.category === 'settlement';
 
@@ -1221,6 +1286,38 @@ export default function Expenses() {
                                                         </div>
                                                     </div>
                                                 )}
+                                            </div>
+
+                                            {/* Persons Selection */}
+                                            <div className="space-y-4">
+                                                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                                    <Users size={14} /> Filtro por Personas
+                                                </h4>
+                                                <p className="text-xs text-slate-500">
+                                                    Si no seleccionas ninguna, se verán los gastos de todos.
+                                                </p>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {householdMembers.map(member => {
+                                                        const isSelected = (household?.houseStatsPersons || []).includes(member.id);
+                                                        return (
+                                                            <button
+                                                                key={member.id}
+                                                                onClick={() => {
+                                                                    const current = household?.houseStatsPersons || [];
+                                                                    if (isSelected) {
+                                                                        updateHouseStatsPersons(current.filter(id => id !== member.id));
+                                                                    } else {
+                                                                        updateHouseStatsPersons([...current, member.id]);
+                                                                    }
+                                                                }}
+                                                                className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all text-sm font-bold ${isSelected ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-500'}`}
+                                                            >
+                                                                <Avatar url={member.photoURL} name={member.displayName} size="xs" />
+                                                                {member.displayName?.split(' ')[0]}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
                                             </div>
 
                                             {/* Categories Selection & Management */}
