@@ -957,85 +957,125 @@ const InvestmentsView = ({ year, stocks, dividends, allStocks, allDividends, use
             </div>
 
             {/* ACCUMULATED ALL-TIME CARD */}
-            <div className="rounded-xl border border-indigo-500/40 bg-gradient-to-br from-indigo-900/20 to-purple-900/20 overflow-hidden">
+            <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/40 via-slate-900/60 to-purple-950/40 overflow-hidden shadow-xl shadow-indigo-500/5">
+                {/* Header — clickable to toggle breakdown */}
                 <div
-                    className="p-4 flex items-center justify-between cursor-pointer hover:bg-white/5 transition-colors"
+                    className="p-5 cursor-pointer hover:bg-white/[0.02] transition-colors"
                     onClick={() => setShowYearBreakdown(v => !v)}
                 >
-                    <div className="flex items-center gap-3">
-                        <div className="bg-indigo-500/20 p-2 rounded-lg text-indigo-400">
-                            <TrendingUp size={20} />
+                    {/* Top row: icon + title + chevron */}
+                    <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-indigo-500/15 p-2.5 rounded-xl text-indigo-400 ring-1 ring-indigo-500/20">
+                                <TrendingUp size={20} />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-slate-200 text-sm">Total Acumulado Histórico</h3>
+                                <p className="text-[11px] text-slate-500 mt-0.5">Plusvalías + Dividendos de todos los años</p>
+                            </div>
                         </div>
-                        <div>
-                            <h3 className="font-medium text-slate-300 text-sm">Total Acumulado Histórico</h3>
-                            <p className="text-xs text-slate-500">Plusvalías + Dividendos de todos los años</p>
+                        <div className={`text-slate-500 transition-transform duration-300 ${showYearBreakdown ? 'rotate-180' : ''}`}>
+                            <ChevronDown size={20} />
                         </div>
                     </div>
-                    <div className="flex items-center gap-4">
-                        <div className="text-right">
-                            <div className="flex items-center justify-end gap-2 mb-0.5">
-                                <p className={`text-2xl font-bold ${allTimeTotal >= 0 ? 'text-indigo-300' : 'text-red-400'}`}>
-                                    {allTimeTotal >= 0 ? '+' : ''}{allTimeTotal.toFixed(2)}€
-                                </p>
-                                {allTimeROI !== null && (
-                                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${allTimeROI >= 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                                        {allTimeROI >= 0 ? '+' : ''}{allTimeROI.toFixed(2)}% ROI
-                                    </span>
-                                )}
-                            </div>
-                            <div className="flex gap-3 justify-end text-xs mt-0.5">
-                                <span className="text-slate-500">Acc: <span className={allTimeStockProfit >= 0 ? 'text-green-400 font-mono' : 'text-red-400 font-mono'}>{allTimeStockProfit.toFixed(2)}€</span></span>
-                                <span className="text-slate-500">Div: <span className="text-green-400 font-mono">{allTimeDivProfit.toFixed(2)}€</span></span>
-                                {allTimeTotalInvested > 0 && <span className="text-slate-500">Inv: <span className="text-slate-300 font-mono">{allTimeTotalInvested.toFixed(2)}€</span></span>}
-                            </div>
+
+                    {/* Main amount + ROI */}
+                    <div className="flex items-end justify-between gap-3 mb-4">
+                        <p className={`text-3xl font-black tracking-tight ${allTimeTotal >= 0 ? 'text-indigo-300' : 'text-red-400'}`}>
+                            {allTimeTotal >= 0 ? '+' : ''}{allTimeTotal.toFixed(2)}€
+                        </p>
+                        {allTimeROI !== null && (
+                            <span className={`text-xs font-bold px-2.5 py-1 rounded-lg shrink-0 ${allTimeROI >= 0 ? 'bg-green-500/15 text-green-400 ring-1 ring-green-500/20' : 'bg-red-500/15 text-red-400 ring-1 ring-red-500/20'}`}>
+                                {allTimeROI >= 0 ? '+' : ''}{allTimeROI.toFixed(2)}% ROI
+                            </span>
+                        )}
+                    </div>
+
+                    {/* Sub-metrics grid */}
+                    <div className="grid grid-cols-3 gap-2">
+                        <div className="bg-slate-800/40 rounded-xl p-3 border-l-2 border-blue-400">
+                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Acciones</p>
+                            <p className={`text-sm font-bold font-mono ${allTimeStockProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {allTimeStockProfit >= 0 ? '+' : ''}{allTimeStockProfit.toFixed(2)}€
+                            </p>
                         </div>
-                        <div className={`text-slate-400 transition-transform duration-200 ${showYearBreakdown ? 'rotate-180' : ''}`}>
-                            <ChevronDown size={18} />
+                        <div className="bg-slate-800/40 rounded-xl p-3 border-l-2 border-amber-400">
+                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Dividendos</p>
+                            <p className="text-sm font-bold font-mono text-green-400">
+                                +{allTimeDivProfit.toFixed(2)}€
+                            </p>
+                        </div>
+                        <div className="bg-slate-800/40 rounded-xl p-3 border-l-2 border-slate-500">
+                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Invertido</p>
+                            <p className="text-sm font-bold font-mono text-slate-300">
+                                {allTimeTotalInvested.toFixed(2)}€
+                            </p>
                         </div>
                     </div>
                 </div>
 
                 {/* Per-year breakdown */}
                 {showYearBreakdown && byYear.length > 0 && (
-                    <div className="border-t border-indigo-500/20 px-4 pb-4 pt-3 space-y-2">
-                        <p className="text-xs text-slate-500 uppercase tracking-wider font-bold mb-2">Desglose por año</p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                            {byYear.map(row => (
-                                <div
-                                    key={row.year}
-                                    className={`flex items-center justify-between p-3 rounded-lg border text-sm ${
-                                        row.year === year
-                                            ? 'bg-amber-500/10 border-amber-500/40'
-                                            : 'bg-slate-900/50 border-slate-700/50'
-                                    }`}
-                                >
-                                    <div>
-                                        <div className="flex items-center gap-1.5">
-                                            <span className={`font-bold ${row.year === year ? 'text-amber-400' : 'text-slate-300'}`}>
-                                                {row.year}
-                                            </span>
-                                            {row.year === year && <span className="text-[10px] text-amber-500 font-bold">AÑO ACTUAL</span>}
-                                            {row.roi !== null && (
-                                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${row.roi >= 0 ? 'bg-green-500/15 text-green-400' : 'bg-red-500/15 text-red-400'}`}>
-                                                    {row.roi >= 0 ? '+' : ''}{row.roi.toFixed(1)}%
+                    <div className="border-t border-indigo-500/15 bg-slate-900/30 px-5 pb-5 pt-4 space-y-3">
+                        <p className="text-[11px] text-slate-500 uppercase tracking-widest font-bold">Desglose por Año</p>
+                        <div className="space-y-2.5">
+                            {byYear.map(row => {
+                                const isCurrent = row.year === year;
+                                return (
+                                    <div
+                                        key={row.year}
+                                        className={`rounded-xl border p-4 transition-all ${
+                                            isCurrent
+                                                ? 'bg-amber-500/5 border-amber-500/30 ring-1 ring-amber-500/10'
+                                                : 'bg-slate-800/30 border-slate-700/40 hover:border-slate-600/60'
+                                        }`}
+                                    >
+                                        {/* Year header row */}
+                                        <div className="flex items-center justify-between mb-2">
+                                            <div className="flex items-center gap-2">
+                                                <span className={`text-lg font-black ${isCurrent ? 'text-amber-400' : 'text-slate-200'}`}>
+                                                    {row.year}
                                                 </span>
+                                                {isCurrent && (
+                                                    <span className="text-[9px] text-amber-500 font-black uppercase bg-amber-500/10 px-2 py-0.5 rounded-md tracking-wider">
+                                                        Año Actual
+                                                    </span>
+                                                )}
+                                                {row.roi !== null && (
+                                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${row.roi >= 0 ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
+                                                        {row.roi >= 0 ? '+' : ''}{row.roi.toFixed(1)}%
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <span className={`text-lg font-black font-mono ${row.total >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                {row.total >= 0 ? '+' : ''}{row.total.toFixed(2)}€
+                                            </span>
+                                        </div>
+                                        {/* Sub-details */}
+                                        <div className="flex gap-4 text-xs">
+                                            {row.stocks !== 0 && (
+                                                <div className="flex items-center gap-1.5">
+                                                    <div className="w-1.5 h-1.5 rounded-full bg-blue-400"></div>
+                                                    <span className="text-slate-500">Acc:</span>
+                                                    <span className={`font-mono font-bold ${row.stocks >= 0 ? 'text-green-400' : 'text-red-400'}`}>{row.stocks.toFixed(2)}€</span>
+                                                </div>
+                                            )}
+                                            {row.dividends !== 0 && (
+                                                <div className="flex items-center gap-1.5">
+                                                    <div className="w-1.5 h-1.5 rounded-full bg-amber-400"></div>
+                                                    <span className="text-slate-500">Div:</span>
+                                                    <span className="font-mono font-bold text-green-400">{row.dividends.toFixed(2)}€</span>
+                                                </div>
                                             )}
                                         </div>
-                                        <div className="flex gap-2 text-xs text-slate-500 mt-0.5">
-                                            {row.stocks !== 0 && <span>Acc: <span className={row.stocks >= 0 ? 'text-green-400' : 'text-red-400'}>{row.stocks.toFixed(2)}€</span></span>}
-                                            {row.dividends !== 0 && <span>Div: <span className="text-green-400">{row.dividends.toFixed(2)}€</span></span>}
-                                        </div>
                                     </div>
-                                    <span className={`font-bold font-mono ${row.total >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                        {row.total >= 0 ? '+' : ''}{row.total.toFixed(2)}€
-                                    </span>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
                 )}
                 {showYearBreakdown && byYear.length === 0 && (
-                    <div className="border-t border-indigo-500/20 px-4 py-4 text-center text-slate-500 text-sm">
+                    <div className="border-t border-indigo-500/15 px-5 py-8 text-center text-slate-500 text-sm">
                         No hay datos históricos registrados.
                     </div>
                 )}
