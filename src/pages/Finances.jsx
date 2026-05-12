@@ -17,6 +17,8 @@ export default function Finances() {
     const [stocks, setStocks] = useState([]);
     const [dividends, setDividends] = useState([]);
     const [savings, setSavings] = useState([]);
+    const [allStocks, setAllStocks] = useState([]);
+    const [allDividends, setAllDividends] = useState([]);
 
     // UI State
     const [isLoading, setIsLoading] = useState(true);
@@ -74,7 +76,6 @@ export default function Finances() {
         });
 
         // Fetch Savings (All time history for balance)
-        // Fetch Savings (All time history for balance)
         const savingsQ = query(
             collection(db, 'users', user.uid, 'investments'),
             where('type', '==', 'savings')
@@ -86,11 +87,30 @@ export default function Finances() {
             setSavings(data);
         });
 
+        // Fetch ALL-TIME stocks and dividends (no year filter) for accumulated totals
+        const allStocksQ = query(
+            collection(db, 'users', user.uid, 'investments'),
+            where('type', '==', 'sale')
+        );
+        const unsubAllStocks = onSnapshot(allStocksQ, (snap) => {
+            setAllStocks(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        });
+
+        const allDividendsQ = query(
+            collection(db, 'users', user.uid, 'investments'),
+            where('type', '==', 'dividend')
+        );
+        const unsubAllDividends = onSnapshot(allDividendsQ, (snap) => {
+            setAllDividends(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        });
+
         return () => {
             unsubscribe();
             unsubStocks();
             unsubDividends();
             unsubSavings();
+            unsubAllStocks();
+            unsubAllDividends();
         }
     }, [user, year]);
 
@@ -133,7 +153,7 @@ export default function Finances() {
         const targetGroup = type === 'income' ? 'incomes' : 'expenses';
         if (!newData.monthly[monthIndex][targetGroup]) newData.monthly[monthIndex][targetGroup] = {};
 
-        newData.monthly[monthIndex][targetGroup][category] = Number(value);
+        newData.monthly[monthIndex][targetGroup][category] = Math.round(Number(value) * 100) / 100;
 
         // Optimistic update (optional, but good for UI responsiveness if snapshot laggy)
         setFinanceData(newData);
@@ -300,6 +320,8 @@ export default function Finances() {
                     year={year}
                     stocks={stocks}
                     dividends={dividends}
+                    allStocks={allStocks}
+                    allDividends={allDividends}
                     userId={user.uid}
                 />
             )}
@@ -587,7 +609,7 @@ const BudgetView = ({ year, data, onUpdate, pieData, totals }) => {
                                                     step="0.01"
                                                     disabled={isLocked}
                                                     className={`w-full h-full bg-transparent text-center p-2 outline-none transition-colors ${isLocked ? 'text-slate-500 cursor-not-allowed' : 'focus:bg-slate-800 text-slate-300'}`}
-                                                    value={val || ''}
+                                                    value={val ? parseFloat(Number(val).toFixed(2)) : ''}
                                                     placeholder="-"
                                                     onChange={(e) => onUpdate(i, 'income', cat, e.target.value)}
                                                 />
@@ -648,7 +670,7 @@ const BudgetView = ({ year, data, onUpdate, pieData, totals }) => {
     );
 };
 
-const InvestmentsView = ({ year, stocks, dividends, userId }) => {
+const InvestmentsView = ({ year, stocks, dividends, allStocks, allDividends, userId }) => {
     const [invTab, setInvTab] = useState('stocks'); // 'stocks' | 'dividends'
     const [isAdding, setIsAdding] = useState(false);
     const [editingStock, setEditingStock] = useState(null); // Record being edited
@@ -875,6 +897,39 @@ const InvestmentsView = ({ year, stocks, dividends, userId }) => {
 
     const totalDivProfit = dividends.reduce((acc, curr) => acc + curr.amount, 0);
 
+    // All-time accumulated totals
+    const allTimeStockProfit = allStocks.reduce((acc, curr) => acc + (curr.profit || 0), 0);
+    const allTimeDivProfit = allDividends.reduce((acc, curr) => acc + (curr.amount || 0), 0);
+    const allTimeTotal = allTimeStockProfit + allTimeDivProfit;
+    const allTimeTotalInvested = allStocks.reduce((acc, curr) => acc + (curr.buyAmount || 0), 0);
+    const allTimeROI = allTimeTotalInvested > 0 ? (allTimeStockProfit / allTimeTotalInvested) * 100 : null;
+
+    // Group by year for the breakdown
+    const byYear = useMemo(() => {
+        const map = {};
+        allStocks.forEach(s => {
+            const y = s.year || new Date(s.date).getFullYear();
+            if (!map[y]) map[y] = { stocks: 0, dividends: 0, invested: 0 };
+            map[y].stocks += (s.profit || 0);
+            map[y].invested += (s.buyAmount || 0);
+        });
+        allDividends.forEach(d => {
+            const y = d.year || new Date(d.date).getFullYear();
+            if (!map[y]) map[y] = { stocks: 0, dividends: 0, invested: 0 };
+            map[y].dividends += (d.amount || 0);
+        });
+        return Object.entries(map)
+            .sort(([a], [b]) => Number(b) - Number(a))
+            .map(([y, vals]) => ({
+                year: Number(y),
+                ...vals,
+                total: vals.stocks + vals.dividends,
+                roi: vals.invested > 0 ? (vals.stocks / vals.invested) * 100 : null
+            }));
+    }, [allStocks, allDividends]);
+
+    const [showYearBreakdown, setShowYearBreakdown] = useState(false);
+
     return (
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row gap-4">
@@ -899,6 +954,91 @@ const InvestmentsView = ({ year, stocks, dividends, userId }) => {
                     <h3 className="font-medium text-slate-400 text-sm">Total Dividendos</h3>
                     <p className="text-2xl font-bold text-green-400">{totalDivProfit.toFixed(2)}€</p>
                 </div>
+            </div>
+
+            {/* ACCUMULATED ALL-TIME CARD */}
+            <div className="rounded-xl border border-indigo-500/40 bg-gradient-to-br from-indigo-900/20 to-purple-900/20 overflow-hidden">
+                <div
+                    className="p-4 flex items-center justify-between cursor-pointer hover:bg-white/5 transition-colors"
+                    onClick={() => setShowYearBreakdown(v => !v)}
+                >
+                    <div className="flex items-center gap-3">
+                        <div className="bg-indigo-500/20 p-2 rounded-lg text-indigo-400">
+                            <TrendingUp size={20} />
+                        </div>
+                        <div>
+                            <h3 className="font-medium text-slate-300 text-sm">Total Acumulado Histórico</h3>
+                            <p className="text-xs text-slate-500">Plusvalías + Dividendos de todos los años</p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                        <div className="text-right">
+                            <div className="flex items-center justify-end gap-2 mb-0.5">
+                                <p className={`text-2xl font-bold ${allTimeTotal >= 0 ? 'text-indigo-300' : 'text-red-400'}`}>
+                                    {allTimeTotal >= 0 ? '+' : ''}{allTimeTotal.toFixed(2)}€
+                                </p>
+                                {allTimeROI !== null && (
+                                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${allTimeROI >= 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                                        {allTimeROI >= 0 ? '+' : ''}{allTimeROI.toFixed(2)}% ROI
+                                    </span>
+                                )}
+                            </div>
+                            <div className="flex gap-3 justify-end text-xs mt-0.5">
+                                <span className="text-slate-500">Acc: <span className={allTimeStockProfit >= 0 ? 'text-green-400 font-mono' : 'text-red-400 font-mono'}>{allTimeStockProfit.toFixed(2)}€</span></span>
+                                <span className="text-slate-500">Div: <span className="text-green-400 font-mono">{allTimeDivProfit.toFixed(2)}€</span></span>
+                                {allTimeTotalInvested > 0 && <span className="text-slate-500">Inv: <span className="text-slate-300 font-mono">{allTimeTotalInvested.toFixed(2)}€</span></span>}
+                            </div>
+                        </div>
+                        <div className={`text-slate-400 transition-transform duration-200 ${showYearBreakdown ? 'rotate-180' : ''}`}>
+                            <ChevronDown size={18} />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Per-year breakdown */}
+                {showYearBreakdown && byYear.length > 0 && (
+                    <div className="border-t border-indigo-500/20 px-4 pb-4 pt-3 space-y-2">
+                        <p className="text-xs text-slate-500 uppercase tracking-wider font-bold mb-2">Desglose por año</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                            {byYear.map(row => (
+                                <div
+                                    key={row.year}
+                                    className={`flex items-center justify-between p-3 rounded-lg border text-sm ${
+                                        row.year === year
+                                            ? 'bg-amber-500/10 border-amber-500/40'
+                                            : 'bg-slate-900/50 border-slate-700/50'
+                                    }`}
+                                >
+                                    <div>
+                                        <div className="flex items-center gap-1.5">
+                                            <span className={`font-bold ${row.year === year ? 'text-amber-400' : 'text-slate-300'}`}>
+                                                {row.year}
+                                            </span>
+                                            {row.year === year && <span className="text-[10px] text-amber-500 font-bold">AÑO ACTUAL</span>}
+                                            {row.roi !== null && (
+                                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${row.roi >= 0 ? 'bg-green-500/15 text-green-400' : 'bg-red-500/15 text-red-400'}`}>
+                                                    {row.roi >= 0 ? '+' : ''}{row.roi.toFixed(1)}%
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="flex gap-2 text-xs text-slate-500 mt-0.5">
+                                            {row.stocks !== 0 && <span>Acc: <span className={row.stocks >= 0 ? 'text-green-400' : 'text-red-400'}>{row.stocks.toFixed(2)}€</span></span>}
+                                            {row.dividends !== 0 && <span>Div: <span className="text-green-400">{row.dividends.toFixed(2)}€</span></span>}
+                                        </div>
+                                    </div>
+                                    <span className={`font-bold font-mono ${row.total >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                        {row.total >= 0 ? '+' : ''}{row.total.toFixed(2)}€
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+                {showYearBreakdown && byYear.length === 0 && (
+                    <div className="border-t border-indigo-500/20 px-4 py-4 text-center text-slate-500 text-sm">
+                        No hay datos históricos registrados.
+                    </div>
+                )}
             </div>
 
             <div className="flex justify-between items-center">
