@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import Expenses from '../pages/Expenses';
 import * as StoreContext from '../context/StoreContext';
@@ -9,6 +9,11 @@ vi.mock('../context/StoreContext', () => ({
 }));
 
 describe('Expenses Financial Core', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+    });
+
     const members = [
         { id: 'u1', displayName: 'Jose' },
         { id: 'u2', displayName: 'Maria' },
@@ -22,7 +27,7 @@ describe('Expenses Financial Core', () => {
         ];
 
         StoreContext.useStore.mockReturnValue({
-            expenses, householdMembers: members, user: { uid: 'u1' },
+            expenses, recurringExpenses: [], householdMembers: members, user: { uid: 'u1' },
             addExpense: vi.fn(), household: { expenseCategories: [] }
         });
 
@@ -61,7 +66,7 @@ describe('Expenses Financial Core', () => {
         ];
 
         StoreContext.useStore.mockReturnValue({
-            expenses, householdMembers: members, user: { uid: 'u1' },
+            expenses, recurringExpenses: [], householdMembers: members, user: { uid: 'u1' },
             addExpense: vi.fn(), household: { expenseCategories: [] }
         });
 
@@ -81,7 +86,7 @@ describe('Expenses Financial Core', () => {
         ];
 
         StoreContext.useStore.mockReturnValue({
-            expenses, householdMembers: members, user: { uid: 'u1' },
+            expenses, recurringExpenses: [], householdMembers: members, user: { uid: 'u1' },
             addExpense: vi.fn(), household: { expenseCategories: [] }
         });
 
@@ -100,7 +105,7 @@ describe('Expenses Financial Core', () => {
         ];
 
         StoreContext.useStore.mockReturnValue({
-            expenses, householdMembers: members, user: { uid: 'u1' },
+            expenses, recurringExpenses: [], householdMembers: members, user: { uid: 'u1' },
             addExpense: vi.fn(), household: { expenseCategories: [] }
         });
 
@@ -110,5 +115,51 @@ describe('Expenses Financial Core', () => {
         // Balance should be exactly 0.30 (or +0.30 and -0.30)
         expect(screen.getByText('+0.30€')).toBeInTheDocument();
         expect(screen.getByText('-0.30€')).toBeInTheDocument();
+    });
+
+    it.each([
+        { now: new Date(2026, 9, 15, 10), previousMonth: true, title: 'Liquidación septiembre' },
+        { now: new Date(2027, 0, 15, 10), previousMonth: true, title: 'Liquidación diciembre' },
+        { now: new Date(2026, 9, 15, 10), previousMonth: false, title: 'Liquidación octubre' },
+    ])('records $title in the selected month (previousMonth: $previousMonth)', ({ now, previousMonth, title }) => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(now);
+        vi.spyOn(window, 'confirm').mockReturnValue(true);
+        const expectedDate = previousMonth
+            ? new Date(now.getFullYear(), now.getMonth() - 1, 1, 12)
+            : now;
+        const addExpense = vi.fn();
+        const store = {
+            expenses: [{
+                id: 'e1', title: 'Compra', amount: 50, payerId: 'u1',
+                splitAmong: ['u1', 'u2'], date: expectedDate.toISOString(),
+            }],
+            recurringExpenses: [], householdMembers: members, user: { uid: 'u1' },
+            addExpense, household: { expenseCategories: [] },
+        };
+        StoreContext.useStore.mockReturnValue(store);
+        const { container, rerender } = render(<Expenses />);
+        if (previousMonth) {
+            fireEvent.click(container.querySelector('.lucide-chevron-left').closest('button'));
+        }
+        fireEvent.click(screen.getByText(/Saldos/i));
+        fireEvent.click(screen.getByRole('button', { name: 'MARCAR COMO PAGADO' }));
+
+        expect(addExpense).toHaveBeenCalledExactlyOnceWith(
+            title, 25, 'settlement', 'u2', ['u1'], 'equal', {}, expectedDate.toISOString()
+        );
+
+        // Simulate the store receiving the saved payment, including its submitted date.
+        const [savedTitle, amount, category, payerId, splitAmong, splitMode, customAmounts, date] = addExpense.mock.calls[0];
+        StoreContext.useStore.mockReturnValue({
+            ...store,
+            expenses: [...store.expenses, { id: 's1', title: savedTitle, amount, category, payerId, splitAmong, splitMode, customAmounts, date }],
+        });
+        rerender(<Expenses />);
+        expect(screen.getByText(/Todo cuadrado/i)).toBeInTheDocument();
+        if (previousMonth) {
+            fireEvent.click(container.querySelector('.lucide-chevron-right').closest('button'));
+            expect(screen.getByText(/Todo cuadrado/i)).toBeInTheDocument();
+        }
     });
 });

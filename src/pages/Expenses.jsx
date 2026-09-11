@@ -196,7 +196,11 @@ export default function Expenses() {
         const confirmMsg = `¿Confirmar que ${debtor.displayName} ha pagado ${amount.toFixed(2)}€ a ${creditor.displayName}?`;
         if (window.confirm(confirmMsg)) {
             const settlementTitle = `Liquidación ${format(currentMonth, 'MMMM', { locale: es })}`;
-            addExpense(settlementTitle, amount, 'settlement', debtor.id, [creditor.id]);
+            // Match regular expenses: use the selected month, preserving today's time only in the current month.
+            const settlementDate = isThisMonth(currentMonth)
+                ? new Date().toISOString()
+                : new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1, 12, 0, 0).toISOString();
+            addExpense(settlementTitle, amount, 'settlement', debtor.id, [creditor.id], 'equal', {}, settlementDate);
         }
     }
 
