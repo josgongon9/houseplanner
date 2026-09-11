@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../context/StoreContext';
+import MoneyOrganization from '../components/MoneyOrganization';
 import { db, doc, getDoc, setDoc, onSnapshot, updateDoc, collection, addDoc, query, where, orderBy, getDocs, deleteDoc, runTransaction } from '../lib/firebase';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -11,6 +12,15 @@ export default function Finances() {
     const { user } = useStore();
     const [year, setYear] = useState(new Date().getFullYear());
     const [view, setView] = useState('budget'); // 'budget' | 'investments'
+    const [organizationDirty, setOrganizationDirty] = useState(false);
+    const [organizationBusy, setOrganizationBusy] = useState(false);
+    const changeView = next => {
+        if (organizationBusy) return;
+        if (next === view) return;
+        if (organizationDirty && !window.confirm('Hay cambios sin guardar en tu reparto. ¿Descartarlos y cambiar de pestaña?')) return;
+        setOrganizationDirty(false);
+        setView(next);
+    };
 
     // Data State
     const [financeData, setFinanceData] = useState(null); // { incomeCategories: [], expenseCategories: [], monthly: { 0: { incomes: {}, expenses: {} }, ... } }
@@ -252,18 +262,18 @@ export default function Finances() {
                     <h1 className="text-2xl font-bold bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent flex items-center gap-2">
                         <TrendingUp /> Finanzas Personales
                     </h1>
-                    <button
+                    {view !== 'organization' && <button
                         onClick={() => setShowControls(!showControls)}
                         className={`p-2 rounded-lg transition-colors ${showControls ? 'bg-amber-500 text-black' : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}
                         title="Configuración y Año"
                     >
                         <Settings size={20} />
-                    </button>
+                    </button>}
                     {/* Showing year always might be nice, or hiding it as well? User said 'Gestioanr categorias y el año'. Ill hide year too. */}
-                    {!showControls && <span className="text-slate-500 text-sm font-bold bg-slate-900 px-2 py-1 rounded border border-slate-800">{year}</span>}
+                    {view !== 'organization' && !showControls && <span className="text-slate-500 text-sm font-bold bg-slate-900 px-2 py-1 rounded border border-slate-800">{year}</span>}
                 </div>
 
-                <div className={`overflow-hidden transition-all duration-300 ${showControls ? 'max-h-20 opacity-100' : 'max-h-0 opacity-0'}`}>
+                <div className={`overflow-hidden transition-all duration-300 ${showControls && view !== 'organization' ? 'max-h-20 opacity-100' : 'max-h-0 opacity-0'}`}>
                     <div className="flex items-center gap-2">
                         {view === 'budget' && (
                             <button
@@ -283,28 +293,33 @@ export default function Finances() {
             </div>
 
             {/* TABS */}
-            <div className="flex gap-2 border-b border-slate-700">
+            <div className="flex gap-1 overflow-x-auto whitespace-nowrap border-b border-slate-700">
                 <button
-                    onClick={() => setView('budget')}
+                    onClick={() => changeView('budget')}
                     className={`pb-2 px-4 font-bold text-sm transition-colors border-b-2 ${view === 'budget' ? 'border-amber-500 text-amber-400' : 'border-transparent text-slate-400'}`}
                 >
                     Presupuesto
                 </button>
                 <button
-                    onClick={() => setView('investments')}
+                    onClick={() => changeView('investments')}
                     className={`pb-2 px-4 font-bold text-sm transition-colors border-b-2 ${view === 'investments' ? 'border-amber-500 text-amber-400' : 'border-transparent text-slate-400'}`}
                 >
                     Inversiones
                 </button>
                 <button
-                    onClick={() => setView('accounts')}
+                    onClick={() => changeView('accounts')}
                     className={`pb-2 px-4 font-bold text-sm transition-colors border-b-2 ${view === 'accounts' ? 'border-amber-500 text-amber-400' : 'border-transparent text-slate-400'}`}
                 >
                     Cuentas
                 </button>
+                <button onClick={() => changeView('organization')}
+                    className={`pb-2 px-4 font-bold text-sm transition-colors border-b-2 ${view === 'organization' ? 'border-amber-500 text-amber-400' : 'border-transparent text-slate-400'}`}>
+                    Organización
+                </button>
             </div>
 
             {/* VIEWS */}
+            {view === 'organization' && user && <MoneyOrganization key={user.uid} userId={user.uid} onDirtyChange={setOrganizationDirty} onBusyChange={setOrganizationBusy} />}
             {view === 'budget' && (
                 <BudgetView
                     year={year}
