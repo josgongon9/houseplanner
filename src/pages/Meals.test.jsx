@@ -24,7 +24,7 @@ describe('Meals Component', () => {
         }
     ];
 
-    it('renders the meals list sorted alphabetically', () => {
+    it('renders meals with the lowest stock first by default', () => {
         StoreContext.useStore.mockReturnValue({
             meals: mockMeals,
             menu: [],
@@ -41,6 +41,37 @@ describe('Meals Component', () => {
         expect(screen.getByText('Sopa')).toBeInTheDocument();
         expect(screen.getByText('Almuerzo')).toBeInTheDocument();
         expect(screen.getByText('Cena')).toBeInTheDocument();
+
+        const mealNames = screen.getAllByRole('heading', { level: 3 });
+        expect(mealNames.map(meal => meal.textContent)).toEqual(['Lentejas', 'Sopa']);
+    });
+
+    it('allows sorting meals by highest stock and by name', () => {
+        const meals = [
+            { id: 'meal1', name: 'Arroz', type: 'lunch', quantity: 1 },
+            { id: 'meal2', name: 'Berenjenas', type: 'dinner', quantity: 5 },
+            { id: 'meal3', name: 'Croquetas', type: 'both', quantity: 0 },
+        ];
+
+        StoreContext.useStore.mockReturnValue({
+            meals,
+            menu: [],
+            addMeal: vi.fn(),
+            updateMealStock: vi.fn(),
+            updateMeal: vi.fn(),
+            deleteMeal: vi.fn()
+        });
+
+        render(<Meals />);
+
+        const getMealNames = () => screen.getAllByRole('heading', { level: 3 }).map(meal => meal.textContent);
+        expect(getMealNames()).toEqual(['Croquetas', 'Arroz', 'Berenjenas']);
+
+        fireEvent.change(screen.getByLabelText('Ordenar comidas'), { target: { value: 'quantity-desc' } });
+        expect(getMealNames()).toEqual(['Berenjenas', 'Arroz', 'Croquetas']);
+
+        fireEvent.change(screen.getByLabelText('Ordenar comidas'), { target: { value: 'name' } });
+        expect(getMealNames()).toEqual(['Arroz', 'Berenjenas', 'Croquetas']);
     });
 
     it('shows stock warning when planned portions exceed available stock', () => {

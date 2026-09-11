@@ -6,6 +6,7 @@ export default function Meals() {
     const { meals, menu, addMeal, updateMealStock, updateMeal, deleteMeal } = useStore();
     const [showAdd, setShowAdd] = useState(false);
     const [search, setSearch] = useState("");
+    const [sortBy, setSortBy] = useState("quantity-asc");
 
     // Detail Modal State
     const [editingMeal, setEditingMeal] = useState(null);
@@ -65,9 +66,23 @@ export default function Meals() {
         setEditingMeal(null);
     };
 
-    const filteredMeals = meals
-        .filter(m => m.name.toLowerCase().includes(search.toLowerCase()))
-        .sort((a, b) => a.name.localeCompare(b.name));
+    const filteredMeals = useMemo(() => {
+        const compareByName = (a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
+
+        return meals
+            .filter(m => m.name.toLowerCase().includes(search.toLowerCase()))
+            .sort((a, b) => {
+                if (sortBy === 'quantity-asc') {
+                    return Number(a.quantity || 0) - Number(b.quantity || 0) || compareByName(a, b);
+                }
+
+                if (sortBy === 'quantity-desc') {
+                    return Number(b.quantity || 0) - Number(a.quantity || 0) || compareByName(a, b);
+                }
+
+                return compareByName(a, b);
+            });
+    }, [meals, search, sortBy]);
 
     return (
         <div className="p-4 space-y-4 max-w-md mx-auto w-full">
@@ -81,16 +96,30 @@ export default function Meals() {
                 </button>
             </header>
 
-            {/* Search */}
-            <div className="relative">
-                <Search className="absolute left-3 top-3 text-slate-400" size={18} />
-                <input
-                    type="text"
-                    placeholder="Buscar..."
-                    className="w-full bg-surface border border-slate-700 rounded-xl py-2 pl-10 pr-4 focus:outline-none focus:border-primary transition-colors"
-                    value={search}
-                    onChange={e => setSearch(e.target.value)}
-                />
+            {/* Search and sorting */}
+            <div className="flex gap-2">
+                <div className="relative flex-1 min-w-0">
+                    <Search className="absolute left-3 top-3 text-slate-400" size={18} />
+                    <input
+                        type="text"
+                        placeholder="Buscar..."
+                        className="w-full bg-surface border border-slate-700 rounded-xl py-2 pl-10 pr-4 focus:outline-none focus:border-primary transition-colors"
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                    />
+                </div>
+                <label className="sr-only" htmlFor="meal-sort">Ordenar comidas</label>
+                <select
+                    id="meal-sort"
+                    aria-label="Ordenar comidas"
+                    className="max-w-[148px] bg-surface border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-primary transition-colors"
+                    value={sortBy}
+                    onChange={e => setSortBy(e.target.value)}
+                >
+                    <option value="quantity-asc">Menos stock</option>
+                    <option value="quantity-desc">Más stock</option>
+                    <option value="name">Nombre A-Z</option>
+                </select>
             </div>
 
             {/* Add Form */}
