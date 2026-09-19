@@ -2,6 +2,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import Expenses from '../pages/Expenses';
 import * as StoreContext from '../context/StoreContext';
+import useBankImports from '../hooks/useBankImports';
+vi.mock('../hooks/useBankImports', () => ({ default: vi.fn(() => ({ reports: [], loading: false, error: '' })) }));
 
 // Mock the context hook
 vi.mock('../context/StoreContext', () => ({
@@ -10,6 +12,7 @@ vi.mock('../context/StoreContext', () => ({
 
 describe('Expenses Financial Core', () => {
     afterEach(() => {
+        useBankImports.mockReturnValue({ reports: [], loading: false, error: '' });
         vi.useRealTimers();
         vi.restoreAllMocks();
     });
@@ -19,6 +22,50 @@ describe('Expenses Financial Core', () => {
         { id: 'u2', displayName: 'Maria' },
         { id: 'u3', displayName: 'Lucas' }
     ];
+
+    it('does not generate recurring expenses when browsing the next month', () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date(2026, 8, 19));
+        const generateRecurringExpenses = vi.fn();
+        StoreContext.useStore.mockReturnValue({ expenses: [], recurringExpenses: [], householdMembers: members, user: { uid: 'u1' }, household: { id: 'h1' }, generateRecurringExpenses });
+        render(<Expenses />);
+        const monthButton = screen.getByRole('button', { name: 'septiembre 2026' });
+        const navigation = monthButton.parentElement.parentElement;
+        fireEvent.click(navigation.querySelectorAll('button')[2]);
+        expect(screen.getByRole('button', { name: /octubre 2026/i })).toBeInTheDocument();
+        expect(generateRecurringExpenses).not.toHaveBeenCalled();
+    });
+
+    it('includes bank imports in totals but never in manual list or balances, and removes their totals on deletion', () => {
+        const date = new Date().toISOString().slice(0, 10);
+        StoreContext.useStore.mockReturnValue({ expenses: [{ id: 'manual', title: 'Manual', amount: 50, payerId: 'u1', splitAmong: ['u1', 'u2'], category: 'groceries', date }], recurringExpenses: [], householdMembers: members, user: { uid: 'u1' }, household: { id: 'h1' } });
+        const reports = [{ id: 'report', fileName: 'test.xlsx', entries: [{ title: 'Banco', amount: 400, category: 'groceries', date }] }];
+        useBankImports.mockReturnValue({ reports, loading: false, error: '' });
+        const view = render(<Expenses />);
+        expect(screen.getByText('Total: 450€')).toBeInTheDocument();
+        expect(screen.getByText('Listado (1)')).toBeInTheDocument();
+        expect(screen.queryByText('Banco')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByText(/Saldos/i));
+        expect(screen.getByText('+25.00€')).toBeInTheDocument();
+        expect(screen.getByText('-25.00€')).toBeInTheDocument();
+        expect(screen.queryByText('Ex-miembro')).not.toBeInTheDocument();
+        useBankImports.mockReturnValue({ reports: [], loading: false, error: '' });
+        view.rerender(<Expenses />);
+        expect(screen.getByText('Total: 50€')).toBeInTheDocument();
+        expect(screen.getByText('+25.00€')).toBeInTheDocument();
+    });
+
+    it('keeps a settled month settled when bank reports are added', () => {
+        const date = new Date().toISOString().slice(0, 10);
+        StoreContext.useStore.mockReturnValue({ expenses: [
+            { id: 'manual', amount: 50, payerId: 'u1', splitAmong: ['u1', 'u2'], category: 'groceries', date },
+            { id: 'settlement', amount: 25, payerId: 'u2', splitAmong: ['u1'], category: 'settlement', date }
+        ], recurringExpenses: [], householdMembers: members, user: { uid: 'u1' }, household: { id: 'h1' } });
+        useBankImports.mockReturnValue({ reports: [{ id: 'report', entries: [{ title: 'Banco', amount: 1000, category: 'other', date }] }], loading: false, error: '' });
+        render(<Expenses />);
+        fireEvent.click(screen.getByText(/Saldos/i));
+        expect(screen.getByText(/Todo cuadrado/i)).toBeInTheDocument();
+    });
 
     it('calculates complex equal splits correctly', () => {
         const expenses = [

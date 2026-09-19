@@ -22,7 +22,7 @@ describe('Monthly money organization', () => {
     afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
     it('calculates fixed and percentage destinations in cents, including overspending', () => {
-        expect(calculateDistribution(savedPlan)).toMatchObject({ income: 200000, allocated: 120000, remaining: 80000, pending: 80000 });
+        expect(calculateDistribution(savedPlan)).toMatchObject({ income: 200000, allocated: 120000, remaining: 80000 });
         expect(calculateDistribution({ income: 0.3, destinations: [
             { amount: 0.1, mode: 'fixed' }, { amount: 0.2, mode: 'fixed' },
         ] }).remaining).toBe(0);
@@ -47,18 +47,19 @@ describe('Monthly money organization', () => {
         expect(screen.getByLabelText('Importe del destino 1')).toHaveValue(400);
     });
 
-    it('copies December into January without changing history and resets completed transfers', async () => {
+    it('copies December into January without changing history and discards legacy transfer states', async () => {
         getDoc.mockImplementation(async ref => snapshot(ref.endsWith('2026-12') ? savedPlan : null));
         mount();
         fireEvent.click(await screen.findByRole('button', { name: 'Copiar mes anterior' }));
         await waitFor(() => expect(screen.getByLabelText('Nómina neta del mes')).toHaveValue(2000));
-        expect(screen.getByRole('button', { name: 'Transferencia Inversión realizada' })).toHaveAttribute('aria-pressed', 'false');
+        expect(screen.queryByRole('button', { name: /Transferencia/ })).not.toBeInTheDocument();
         expect(savedPlan.destinations[0].done).toBe(true);
         expect(setDoc).not.toHaveBeenCalled();
         fireEvent.click(screen.getByRole('button', { name: 'Guardar reparto' }));
         await screen.findByText('Plan guardado');
+        expect(setDoc.mock.calls[0][1].plan.destinations.every(item => !('done' in item))).toBe(true);
         fireEvent.click(screen.getByRole('button', { name: 'Mes anterior' }));
-        await waitFor(() => expect(screen.getByRole('button', { name: 'Transferencia Inversión realizada' })).toHaveAttribute('aria-pressed', 'true'));
+        await waitFor(() => expect(screen.getByLabelText('Nómina neta del mes')).toHaveValue(2000));
         expect(screen.getByText('diciembre de 2026')).toBeInTheDocument();
     });
 

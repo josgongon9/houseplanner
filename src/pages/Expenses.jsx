@@ -1,5 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useStore } from '../context/StoreContext';
+import BankImports from '../components/BankImports';
+import useBankImports from '../hooks/useBankImports';
+import { flattenBankImports } from '../lib/bankImport';
 import { Plus, ArrowLeft, DollarSign, TrendingUp, Calendar, User, Users, ArrowRightLeft, Check, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Lock, Unlock, Grid, PieChart as PieChartIcon, Trash, Edit, Divide, Percent, Zap, Flame, Droplets, BarChart2, Home, Settings, Palette, GripVertical, Repeat, ToggleLeft, ToggleRight } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, subMonths, addMonths, isSameMonth, startOfYear, endOfYear, eachMonthOfInterval, isFuture, isPast, isThisMonth, addYears, subYears } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -22,6 +25,17 @@ export default function Expenses() {
     const [viewMode, setViewMode] = useState('month'); // 'month' | 'year'
     const [activeTab, setActiveTab] = useState('expenses'); // 'expenses' | 'balances' | 'charts' | 'house'
     const [currentMonth, setCurrentMonth] = useState(new Date());
+    const { reports: bankReports, loading: bankLoading, error: bankError } = useBankImports(household?.id, user?.uid);
+    const bankExpenses = useMemo(() => flattenBankImports(bankReports), [bankReports]);
+    const allChartExpenses = useMemo(() => [...expenses, ...bankExpenses], [expenses, bankExpenses]);
+    const monthlyBankExpenses = useMemo(() => bankExpenses.filter(exp => isSameMonth(parseISO(exp.date), currentMonth)), [bankExpenses, currentMonth]);
+    // Import controls are desktop-only; resizing must not leave a blank mobile tab.
+    useEffect(() => {
+        const media = window.matchMedia?.('(min-width: 1024px)');
+        const reset = () => { if (media && !media.matches) setActiveTab(tab => tab === 'bank' ? 'expenses' : tab); };
+        media?.addEventListener('change', reset);
+        return () => media?.removeEventListener('change', reset);
+    }, []);
 
     // Use stored categories if available, otherwise use defaults
     const categories = useMemo(() => {
@@ -102,6 +116,7 @@ export default function Expenses() {
             return selectedPersons.some(uid => split.includes(uid));
         });
     }, [monthlyExpenses, selectedPersons]);
+    const chartMonthlyExpenses = useMemo(() => [...filteredMonthlyExpenses, ...monthlyBankExpenses], [filteredMonthlyExpenses, monthlyBankExpenses]);
 
     // Handle opening modal for CREATE
     const handleOpenAdd = () => {
@@ -159,15 +174,15 @@ export default function Expenses() {
         if (editingId) {
             await updateExpense(editingId, data);
         } else {
-            // If recurring, create the rule AND the current month expense
+            // Create the rule; only the actual current month can be generated now.
             if (isRecurring) {
                 await addRecurringExpense({
                     ...data,
                     startMonth: recurringStartMonth,
                     endMonth: recurringEndMonth || null
                 });
-                // The generation will happen via useEffect or we can generate now
-                await generateRecurringExpenses(currentMonth);
+                // Do not use the month being browsed to book future expenses.
+                await generateRecurringExpenses(new Date());
             } else {
                 // Use currentMonth but preserve today's day/time if we are in the current month
                 let expenseDate = new Date().toISOString();
@@ -313,7 +328,7 @@ export default function Expenses() {
         return debtList;
     }, [balances]);
 
-    const totalMonthly = filteredMonthlyExpenses
+    const totalMonthly = chartMonthlyExpenses
         .filter(e => e.category !== 'settlement')
         .reduce((acc, curr) => acc + Number(curr.amount), 0);
 
@@ -327,7 +342,7 @@ export default function Expenses() {
     }, [currentMonth]);
 
     const getMonthTotal = (monthDate) => {
-        return expenses
+        return allChartExpenses
             .filter(e => isSameMonth(parseISO(e.date), monthDate) && e.category !== 'settlement')
             .reduce((acc, curr) => acc + Number(curr.amount), 0);
     };
@@ -378,14 +393,17 @@ export default function Expenses() {
 
     const individualChartData = useMemo(() => {
         const colors = ['#10B981', '#3B82F6', '#F59E0B', '#F97316', '#8B5CF6', '#EC4899'];
-        return individualPaid
+        const data = individualPaid
             .filter(p => p.amount > 0)
             .map((p, i) => ({
                 name: p.member?.displayName?.split(' ')[0] || '???',
                 value: p.amount,
                 color: colors[i % colors.length]
             }));
-    }, [individualPaid]);
+        const commonTotal = monthlyBankExpenses.reduce((sum, entry) => sum + entry.amount, 0);
+        if (commonTotal > 0) data.push({ name: 'Cuenta común', value: commonTotal, color: '#06B6D4' });
+        return data;
+    }, [individualPaid, monthlyBankExpenses]);
 
     const chartData = useMemo(() => {
         const data = {};
@@ -393,7 +411,7 @@ export default function Expenses() {
             if (c.id !== 'settlement') data[c.id] = 0;
         });
 
-        filteredMonthlyExpenses.forEach(e => {
+        chartMonthlyExpenses.forEach(e => {
             if (e.category === 'settlement') return;
             if (data[e.category] !== undefined) {
                 data[e.category] += Number(e.amount);
@@ -402,7 +420,8 @@ export default function Expenses() {
             }
         });
 
-        return categories
+        const chartCategories = categories.some(c => c.id === 'other') ? categories : [...categories, { id: 'other', name: 'Otro', icon: '📦', color: '#64748B' }];
+        return chartCategories
             .filter(c => c.id !== 'settlement' && data[c.id] > 0)
             .map(c => ({
                 name: c.name,
@@ -411,7 +430,7 @@ export default function Expenses() {
                 color: c.color
             }))
             .sort((a, b) => b.value - a.value);
-    }, [filteredMonthlyExpenses, categories]);
+    }, [chartMonthlyExpenses, categories]);
 
     const statsCategoryIds = useMemo(() => {
         return household?.houseStatsCategories || ['LUZ', 'AGUA', 'GAS'];
@@ -444,7 +463,7 @@ export default function Expenses() {
         const statsPersonIds = household?.houseStatsPersons || [];
 
         return monthsInInterval.map(m => {
-            const mExpensesAll = expenses.filter(e => isSameMonth(parseISO(e.date), m));
+            const mExpensesAll = allChartExpenses.filter(e => isSameMonth(parseISO(e.date), m));
             
             // Filter by selected persons (if any are selected)
             // Empty array means show everyone
@@ -473,7 +492,7 @@ export default function Expenses() {
 
             return monthData;
         });
-    }, [expenses, currentMonth, statsCategoryIds, household?.houseStatsPeriod]);
+    }, [allChartExpenses, currentMonth, statsCategoryIds, household?.houseStatsPeriod, household?.houseStatsPersons]);
 
     const statsTitle = useMemo(() => {
         if (household?.houseStatsPeriod?.mode === 'custom' && household.houseStatsPeriod.start && household.houseStatsPeriod.end) {
@@ -491,13 +510,6 @@ export default function Expenses() {
         });
         return totals;
     }, [yearUtilityData, statsCategoryIds]);
-
-    // Auto-generate recurring expenses when month changes
-    useEffect(() => {
-        if (viewMode === 'month' && generateRecurringExpenses) {
-            generateRecurringExpenses(currentMonth);
-        }
-    }, [currentMonth, viewMode]);
 
     return (
         <div className="p-4 space-y-4 pb-24">
@@ -541,7 +553,7 @@ export default function Expenses() {
                     >
                         {viewMode === 'year' ? <Calendar size={20} /> : <Grid size={20} />}
                     </button>
-                    {!showAdd && viewMode === 'month' && activeTab !== 'house' && (
+                    {!showAdd && viewMode === 'month' && activeTab !== 'house' && activeTab !== 'bank' && (
                         <button
                             onClick={handleOpenAdd}
                             className="bg-emerald-500 hover:bg-emerald-600 text-white p-2 rounded-full shadow-lg transition-transform active:scale-95"
@@ -641,6 +653,9 @@ export default function Expenses() {
                                 className={`flex-1 py-1.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'expenses' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                             >
                                 Listado ({filteredMonthlyExpenses.length})
+                            </button>
+                            <button onClick={() => setActiveTab('bank')} className={`hidden lg:block flex-1 py-1.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'bank' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+                                Cuenta común ({monthlyBankExpenses.length})
                             </button>
                             <button
                                 onClick={() => setActiveTab('charts')}
@@ -886,6 +901,8 @@ export default function Expenses() {
                         </div>
                     )}
 
+                    {activeTab === 'bank' && <BankImports key={`${household?.id}-${user?.uid}`} householdId={household?.id} userId={user?.uid} categories={categories} reports={bankReports} loading={bankLoading} loadError={bankError} month={format(currentMonth, 'yyyy-MM')} />}
+
                     {/* === LIST VIEW === */}
                     {activeTab === 'expenses' && (
                         <div className="space-y-4 animate-in slide-in-from-right-4">
@@ -1108,6 +1125,10 @@ export default function Expenses() {
                                                     </div>
                                                 );
                                             })}
+                                            {monthlyBankExpenses.length > 0 && <div className="flex justify-between items-center p-2 rounded-lg text-sm">
+                                                <span className="flex items-center gap-3 text-slate-300"><span className="w-2 h-2 rounded-full bg-cyan-500" />Cuenta común</span>
+                                                <strong>{monthlyBankExpenses.reduce((sum, entry) => sum + entry.amount, 0).toFixed(2)}€</strong>
+                                            </div>}
                                         </div>
                                     </div>
                                 </div>
@@ -1684,7 +1705,7 @@ export default function Expenses() {
                                         } else {
                                             await addRecurringExpense(data);
                                             // Generate for current month immediately
-                                            await generateRecurringExpenses(currentMonth);
+                                            await generateRecurringExpenses(new Date());
                                         }
                                         setShowRecurringForm(false);
                                         setEditingRecurringId(null);
