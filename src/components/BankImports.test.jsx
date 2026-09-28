@@ -3,15 +3,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import BankImports from './BankImports';
 import { readSheet } from 'read-excel-file/browser';
-import { saveBankImport, removeBankImport } from '../lib/bankImportRepository';
+import { saveBankImport, removeBankImport, updateBankEntryCategory } from '../lib/bankImportRepository';
 vi.mock('read-excel-file/browser', () => ({ readSheet: vi.fn() }));
-vi.mock('../lib/bankImportRepository', () => ({ saveBankImport: vi.fn(), removeBankImport: vi.fn() }));
+vi.mock('../lib/bankImportRepository', () => ({ saveBankImport: vi.fn(), removeBankImport: vi.fn(), updateBankEntryCategory: vi.fn() }));
 const categories = [{ id: 'other', name: 'Otro' }, { id: 'dining', name: 'Restaurantes' }];
 const entry = { title: 'Café', amount: 8, category: 'dining', date: '2026-09-19' };
 const props = { householdId: 'h1', userId: 'u1', reports: [], loading: false, loadError: '', categories, month: '2026-09' };
 const upload = () => fireEvent.change(screen.getByLabelText('Importar informe BBVA'), { target: { files: [new File(['test'], 'test.xlsx')] } });
 
 describe('Bank report review and removal', () => {
+    it('marks an already imported transfer as a CM reimbursement without adding an expense', async () => {
+        render(<BankImports {...props} reports={[{ id: 'report1', fileName: 'previous.xlsx', entries: [entry] }]} />);
+        fireEvent.change(screen.getByLabelText('Categoría del movimiento 1'), { target: { value: 'cm_reimbursement' } });
+        await waitFor(() => expect(updateBankEntryCategory).toHaveBeenCalledWith('h1', 'report1', 0, 'cm_reimbursement'));
+        expect(await screen.findByText('Movimiento actualizado')).toBeInTheDocument();
+        expect(saveBankImport).not.toHaveBeenCalled();
+    });
     beforeEach(() => {
         vi.resetAllMocks();
         readSheet.mockResolvedValue([['Fecha', 'Categoría', 'Subcategoría', 'Importe', 'Concepto'], ['19/09/2026', 'Ocio', 'Bares y restaurantes', '-8,00', 'Café'], ['19/09/2026', 'Ingresos', '', '100,00', 'Ingreso']]);

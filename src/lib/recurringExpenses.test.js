@@ -32,4 +32,12 @@ describe('Recurring expense due dates', () => {
         await generateDueRecurringExpenses('h1', new Date(2026, 9, 1), new Date(2026, 9, 1));
         expect(runTransaction).not.toHaveBeenCalled();
     });
+    it('preserves the common account destination on generated expenses', async () => {
+        const common = { ...rule, chargeTo: 'common' };
+        getDocs.mockResolvedValueOnce(snapshot([['r1', common]])).mockResolvedValueOnce(snapshot([]));
+        const set = vi.fn();
+        runTransaction.mockImplementation(async (_, action) => action({ get: async ref => ref.startsWith('recurringExpenses/') ? { exists: () => true, data: () => common } : { exists: () => false }, set }));
+        await generateDueRecurringExpenses('h1', new Date(2026, 8, 1), new Date(2026, 8, 28));
+        expect(set).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ chargeTo: 'common', payerId: 'u1', amount: 800 }));
+    });
 });

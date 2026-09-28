@@ -79,5 +79,5 @@ export function countOverlappingEntries(entries, imports) {
 }
 
 export function flattenBankImports(imports) {
-    return imports.flatMap(report => report.entries.map((entry, index) => ({ ...entry, id: `${report.id}-${index}`, importId: report.id, source: 'bank' })));
+    return imports.flatMap(report => report.entries.map((entry, index) => ({ ...entry, id: `${report.id}-${index}`, importId: report.id, source: 'bank' }))).filter(entry => entry.category !== 'cm_reimbursement');
 }

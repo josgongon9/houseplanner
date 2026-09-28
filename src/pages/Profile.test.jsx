@@ -15,6 +15,7 @@ vi.mock('../lib/firebase', () => ({
     query: vi.fn(),
     where: vi.fn(),
     getDocs: vi.fn(),
+    getDoc: vi.fn(async () => ({ exists: () => false })),
     doc: vi.fn(),
     updateDoc: vi.fn(),
     documentId: vi.fn(() => 'documentId')

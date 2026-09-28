@@ -24,3 +24,13 @@ export async function removeBankImport(householdId, importId) {
     if (!householdId || !importId) throw new Error('No se encuentra la importación.');
     await deleteDoc(doc(db, ...bankImportsPath(householdId), importId));
 }
+
+export async function updateBankEntryCategory(householdId, importId, index, category) {
+    if (!householdId || !importId) throw new Error('No se encuentra la importación.');
+    const ref = doc(db, ...bankImportsPath(householdId), importId);
+    await runTransaction(db, async transaction => {
+        const snapshot = await transaction.get(ref);
+        if (!snapshot.exists() || !snapshot.data().entries[index]) throw new Error('No se encuentra el movimiento.');
+        transaction.update(ref, { entries: snapshot.data().entries.map((entry, i) => i === index ? { ...entry, category } : entry) });
+    });
+}

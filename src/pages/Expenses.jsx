@@ -1,5 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useStore } from '../context/StoreContext';
+import { expenseAllocation, validateExpenseAllocation } from '../lib/expenseAllocation';
+import CommonAccountBalances from '../components/CommonAccountBalances';
+import { isCommonExpense, pendingCents } from '../lib/commonAccount';
 import BankImports from '../components/BankImports';
 import useBankImports from '../hooks/useBankImports';
 import { flattenBankImports } from '../lib/bankImport';
@@ -29,14 +32,6 @@ export default function Expenses() {
     const bankExpenses = useMemo(() => flattenBankImports(bankReports), [bankReports]);
     const allChartExpenses = useMemo(() => [...expenses, ...bankExpenses], [expenses, bankExpenses]);
     const monthlyBankExpenses = useMemo(() => bankExpenses.filter(exp => isSameMonth(parseISO(exp.date), currentMonth)), [bankExpenses, currentMonth]);
-    // Import controls are desktop-only; resizing must not leave a blank mobile tab.
-    useEffect(() => {
-        const media = window.matchMedia?.('(min-width: 1024px)');
-        const reset = () => { if (media && !media.matches) setActiveTab(tab => tab === 'bank' ? 'expenses' : tab); };
-        media?.addEventListener('change', reset);
-        return () => media?.removeEventListener('change', reset);
-    }, []);
-
     // Use stored categories if available, otherwise use defaults
     const categories = useMemo(() => {
         const storedCategories = household?.expenseCategories;
@@ -59,6 +54,13 @@ export default function Expenses() {
     const [splitAmong, setSplitAmong] = useState([]); // Array of UIDs
     const [splitMode, setSplitMode] = useState('equal'); // 'equal' | 'custom'
     const [customAmounts, setCustomAmounts] = useState({}); // { uid: amount }
+
+    const [chargeTo, setChargeTo] = useState('people');
+    const [formError, setFormError] = useState('');
+    const [formBusy, setFormBusy] = useState(false);
+    const chargeSelector = (
+        <label className="block text-xs font-medium text-slate-400">A cargo de<select aria-label="A cargo de" value={chargeTo} onChange={event => { setChargeTo(event.target.value); if (event.target.value === 'common' && category === 'settlement') setCategory(''); }} className="mt-1 w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white"><option value="people">Personas</option><option value="common">Cuenta común (CM)</option></select></label>
+    );
 
     // Recurring Form State
     const [isRecurring, setIsRecurring] = useState(false);
@@ -123,6 +125,7 @@ export default function Expenses() {
         setEditingId(null);
         setSplitAmong(householdMembers.map(m => m.id));
         setPayerId(user.uid);
+        setChargeTo('people'); setFormError('');
         setTitle("");
         setAmount("");
         setCategory("");
@@ -141,6 +144,7 @@ export default function Expenses() {
         setAmount(exp.amount);
         setCategory(exp.category);
         setPayerId(exp.payerId);
+        setChargeTo(exp.chargeTo || 'people'); setFormError('');
         setSplitAmong(exp.splitAmong || []);
         setSplitMode(exp.splitMode || 'equal');
         setCustomAmounts(exp.customAmounts || {});
@@ -154,10 +158,10 @@ export default function Expenses() {
         if (Number(amount) <= 0) return;
 
         // Custom Split Validation
-        if (splitMode === 'custom') {
+        if (chargeTo !== 'common' && splitMode === 'custom') {
             const sum = Object.values(customAmounts).reduce((acc, curr) => acc + Number(curr), 0);
-            if (Math.abs(sum - Number(amount)) > 0.05) {
-                return;
+            if (Math.round(sum * 100) !== Math.round(Number(amount) * 100)) {
+                setFormError('El reparto debe sumar exactamente el importe del gasto.'); return;
             }
         }
 
@@ -166,44 +170,49 @@ export default function Expenses() {
             amount: Number(amount),
             category,
             payerId,
-            splitAmong: splitMode === 'equal' ? splitAmong : Object.keys(customAmounts).filter(k => Number(customAmounts[k]) > 0),
-            splitMode,
-            customAmounts: splitMode === 'custom' ? customAmounts : {}
+            ...expenseAllocation({ chargeTo, splitAmong, splitMode, customAmounts }, householdMembers)
         };
 
-        if (editingId) {
-            await updateExpense(editingId, data);
-        } else {
-            // Create the rule; only the actual current month can be generated now.
-            if (isRecurring) {
-                await addRecurringExpense({
-                    ...data,
-                    startMonth: recurringStartMonth,
-                    endMonth: recurringEndMonth || null
-                });
-                // Do not use the month being browsed to book future expenses.
-                await generateRecurringExpenses(new Date());
+        if (formBusy) return;
+        setFormBusy(true); setFormError('');
+        try {
+            validateExpenseAllocation(data);
+            if (editingId) {
+                await updateExpense(editingId, data);
             } else {
-                // Use currentMonth but preserve today's day/time if we are in the current month
-                let expenseDate = new Date().toISOString();
-                if (!isThisMonth(currentMonth)) {
-                    // If we are in another month, use the 1st of that month at noon to avoid timezone issues
-                    const targetDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1, 12, 0, 0);
-                    expenseDate = targetDate.toISOString();
+                // Create the rule; only the actual current month can be generated now.
+                if (isRecurring) {
+                    await addRecurringExpense({
+                        ...data,
+                        startMonth: recurringStartMonth,
+                        endMonth: recurringEndMonth || null
+                    });
+                    // Do not use the month being browsed to book future expenses.
+                    await generateRecurringExpenses(new Date());
+                } else {
+                    // Use currentMonth but preserve today's day/time if we are in the current month
+                    let expenseDate = new Date().toISOString();
+                    if (!isThisMonth(currentMonth)) {
+                        // If we are in another month, use the 1st of that month at noon to avoid timezone issues
+                        const targetDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1, 12, 0, 0);
+                        expenseDate = targetDate.toISOString();
+                    }
+                    await addExpense(data.title, data.amount, data.category, data.payerId, data.splitAmong, data.splitMode, data.customAmounts, expenseDate, data.chargeTo);
                 }
-                await addExpense(data.title, data.amount, data.category, data.payerId, data.splitAmong, data.splitMode, data.customAmounts, expenseDate);
             }
-        }
-        setShowAdd(false);
-        setEditingId(null);
+            setShowAdd(false);
+            setEditingId(null);
+        } catch (error) { setFormError(error.message || 'No se pudo guardar el gasto.'); }
+        finally { setFormBusy(false); }
     };
 
     const handleDelete = async () => {
         if (!editingId) return;
         if (confirm("¿Seguro que quieres eliminar este gasto?")) {
-            await deleteExpense(editingId);
-            setShowAdd(false);
-            setEditingId(null);
+            setFormBusy(true); setFormError('');
+            try { await deleteExpense(editingId); setShowAdd(false); setEditingId(null); }
+            catch (error) { setFormError(error.message || 'No se pudo eliminar el gasto.'); }
+            finally { setFormBusy(false); }
         }
     }
 
@@ -251,7 +260,7 @@ export default function Expenses() {
         return Object.values(customAmounts).reduce((acc, curr) => acc + (Number(curr) || 0), 0);
     }, [customAmounts]);
 
-    const isValidCustom = Math.abs(customSum - Number(amount)) < 0.05;
+    const isValidCustom = Math.round(customSum * 100) === Math.round(Number(amount) * 100);
 
     // --- BALANCES LOGIC (Tricount Style) ---
     const balances = useMemo(() => {
@@ -259,6 +268,7 @@ export default function Expenses() {
         householdMembers.forEach(m => balanceMap[m.id] = 0);
 
         monthlyExpenses.forEach(exp => {
+            if (isCommonExpense(exp)) return;
             const cost = Number(exp.amount);
             const payer = exp.payerId;
             const beneficiaries = exp.splitAmong || [];
@@ -333,6 +343,7 @@ export default function Expenses() {
         .reduce((acc, curr) => acc + Number(curr.amount), 0);
 
     const isSettled = transactions.length === 0 && monthlyExpenses.length > 0;
+    const isMonthSettled = isSettled && !monthlyExpenses.some(expense => pendingCents(expense) > 0);
 
     // --- YEAR OVERVIEW DATA ---
     const yearMonths = useMemo(() => {
@@ -511,6 +522,87 @@ export default function Expenses() {
         return totals;
     }, [yearUtilityData, statsCategoryIds]);
 
+    const splitControls = (chargeTo === 'people' && <>
+                                    {/* Split Mode Toggle */}
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-400 mb-2">Para quién (Division)</label>
+                                        <div className="bg-slate-900 p-1 rounded-xl mb-3 flex text-sm">
+                                            <button
+                                                type="button"
+                                                onClick={() => setSplitMode('equal')}
+                                                className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-2 transition-colors ${splitMode === 'equal' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                                            >
+                                                <Divide size={16} /> Partes Iguales
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setSplitMode('custom')}
+                                                className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-2 transition-colors ${splitMode === 'custom' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                                            >
+                                                <Percent size={16} /> Por Importe
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Custom Split Inputs */}
+                                    {splitMode === 'custom' && (
+                                        <div className="space-y-3">
+                                            {householdMembers.map(m => (
+                                                <div key={m.id} className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-2 w-32">
+                                                        <Avatar url={m.photoURL} name={m.displayName} size="xs" />
+                                                        <span className="text-sm overflow-hidden text-ellipsis whitespace-nowrap">{m.displayName?.split(' ')[0]}</span>
+                                                    </div>
+                                                    <div className="relative flex-1">
+                                                        <span className="absolute left-3 top-2.5 text-slate-400 text-xs">€</span>
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            aria-label={`Importe para ${m.displayName}`}
+                                                            value={customAmounts[m.id] || ''}
+                                                            onChange={(e) => handleCustomAmountChange(m.id, e.target.value)}
+                                                            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 pl-6 text-sm outline-none focus:border-emerald-500"
+                                                            placeholder="0.00"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            ))}
+
+                                            {/* Validation Footer */}
+                                            <div className={`p-3 rounded-xl text-center text-sm font-bold flex justify-between items-center border ${isValidCustom ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-red-500/10 border-red-500/30 text-red-400'
+                                                }`}>
+                                                <span>Asignado: {customSum.toFixed(2)}€</span>
+                                                <span>Restante: {(Number(amount) - customSum).toFixed(2)}€</span>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Equal Split Grid (Only if Equal Mode) */}
+                                    {splitMode === 'equal' && (
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {householdMembers.map(m => {
+                                                const isSelected = splitAmong.includes(m.id);
+                                                return (
+                                                    <button
+                                                        type="button"
+                                                        key={m.id}
+                                                        onClick={() => toggleSplitMember(m.id)}
+                                                        className={`flex items-center justify-between p-3 rounded-xl border transition-all ${isSelected ? 'bg-slate-800 border-emerald-500/50 text-white' : 'bg-slate-900 border-slate-800 text-slate-500 opacity-70'
+                                                            }`}
+                                                    >
+                                                        <div className="flex items-center gap-2">
+                                                            <Avatar url={m.photoURL} name={m.displayName} size="xs" />
+                                                            <span className="text-sm">{m.displayName?.split(' ')[0]}</span>
+                                                        </div>
+                                                        {isSelected && <Check size={16} className="text-emerald-500" />}
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                    )}
+
+                                    </>);
+
     return (
         <div className="p-4 space-y-4 pb-24">
 
@@ -556,6 +648,7 @@ export default function Expenses() {
                     {!showAdd && viewMode === 'month' && activeTab !== 'house' && activeTab !== 'bank' && (
                         <button
                             onClick={handleOpenAdd}
+                            aria-label="Añadir gasto"
                             className="bg-emerald-500 hover:bg-emerald-600 text-white p-2 rounded-full shadow-lg transition-transform active:scale-95"
                         >
                             <Plus size={24} />
@@ -586,7 +679,7 @@ export default function Expenses() {
                             )}
                         </button>
                         {viewMode === 'month' && (
-                            isSettled ? (
+                            isMonthSettled ? (
                                 <span className="text-[10px] text-green-400 font-bold bg-green-500/10 px-2 py-0.5 rounded-full border border-green-500/30 flex items-center gap-1 justify-center mx-auto w-max mt-1">
                                     <Lock size={10} /> CERRADO
                                 </span>
@@ -647,31 +740,33 @@ export default function Expenses() {
                 <>
                     {/* Tabs */}
                     {activeTab !== 'house' && (
-                        <div className="flex gap-2 p-1 bg-surface border border-slate-700 rounded-xl">
+                        <div className="flex gap-2 p-1 bg-surface border border-slate-700 rounded-xl overflow-x-auto" aria-label="Vistas de gastos">
                             <button
                                 onClick={() => setActiveTab('expenses')}
-                                className={`flex-1 py-1.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'expenses' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                                className={`shrink-0 sm:flex-1 min-h-[44px] px-3 py-2 text-sm whitespace-nowrap font-bold rounded-lg transition-all ${activeTab === 'expenses' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                             >
                                 Listado ({filteredMonthlyExpenses.length})
                             </button>
-                            <button onClick={() => setActiveTab('bank')} className={`hidden lg:block flex-1 py-1.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'bank' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+                            <button onClick={() => setActiveTab('bank')} className={`shrink-0 sm:flex-1 min-h-[44px] px-3 py-2 text-sm whitespace-nowrap font-bold rounded-lg transition-all ${activeTab === 'bank' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
                                 Cuenta común ({monthlyBankExpenses.length})
                             </button>
                             <button
                                 onClick={() => setActiveTab('charts')}
-                                className={`flex-1 py-1.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'charts' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                                className={`shrink-0 sm:flex-1 min-h-[44px] px-3 py-2 text-sm whitespace-nowrap font-bold rounded-lg transition-all ${activeTab === 'charts' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                             >
                                 Gráficos
                             </button>
                             <button
                                 onClick={() => setActiveTab('balances')}
-                                className={`flex-1 py-1.5 text-sm font-bold rounded-lg transition-all ${activeTab === 'balances' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                                className={`shrink-0 sm:flex-1 min-h-[44px] px-3 py-2 text-sm whitespace-nowrap font-bold rounded-lg transition-all ${activeTab === 'balances' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                             >
                                 Saldos {transactions.length > 0 && <span className="ml-1 w-2 h-2 bg-red-500 rounded-full inline-block"></span>}
                             </button>
                             <button
                                 onClick={() => setActiveTab('recurring')}
-                                className={`flex-1 py-1.5 text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-1 ${activeTab === 'recurring' ? 'bg-violet-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                                aria-label="Gastos recurrentes"
+                                title="Gastos recurrentes"
+                                className={`shrink-0 sm:flex-1 min-h-[44px] px-3 py-2 text-sm whitespace-nowrap font-bold rounded-lg transition-all flex items-center justify-center gap-1 ${activeTab === 'recurring' ? 'bg-violet-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                             >
                                 <Repeat size={14} /> {recurringExpenses.length > 0 && <span className="text-[10px]">({recurringExpenses.length})</span>}
                             </button>
@@ -686,10 +781,10 @@ export default function Expenses() {
                                     <h3 className="font-bold text-lg text-emerald-400">
                                         {editingId ? 'Editar Gasto' : 'Nuevo Gasto'}
                                     </h3>
-                                    <button type="button" onClick={() => setShowAdd(false)} className="p-2 bg-slate-800 rounded-full"><X size={20} /></button>
+                                    <button disabled={formBusy} type="button" onClick={() => setShowAdd(false)} className="p-2 bg-slate-800 rounded-full"><X size={20} /></button>
                                 </div>
 
-                                <div className="p-4 space-y-4 pb-12">
+                                <fieldset disabled={formBusy} className="p-4 space-y-4 pb-12">
                                     {/* Amount & Title */}
                                     <div className="flex gap-4">
                                         <div className="flex-1">
@@ -720,7 +815,7 @@ export default function Expenses() {
                                             required
                                         >
                                             <option value="" disabled>Selecciona una categoría</option>
-                                            {categories.map(cat => (
+                                            {categories.filter(cat => chargeTo !== 'common' || cat.id !== 'settlement').map(cat => (
                                                 <option key={cat.id} value={cat.id}>
                                                     {cat.icon} {cat.name}
                                                 </option>
@@ -747,83 +842,8 @@ export default function Expenses() {
                                         </div>
                                     </div>
 
-                                    {/* Split Mode Toggle */}
-                                    <div>
-                                        <label className="block text-xs font-medium text-slate-400 mb-2">Para quién (Division)</label>
-                                        <div className="bg-slate-900 p-1 rounded-xl mb-3 flex text-sm">
-                                            <button
-                                                type="button"
-                                                onClick={() => setSplitMode('equal')}
-                                                className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-2 transition-colors ${splitMode === 'equal' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}
-                                            >
-                                                <Divide size={16} /> Partes Iguales
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setSplitMode('custom')}
-                                                className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-2 transition-colors ${splitMode === 'custom' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}
-                                            >
-                                                <Percent size={16} /> Por Importe
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    {/* Custom Split Inputs */}
-                                    {splitMode === 'custom' && (
-                                        <div className="space-y-3">
-                                            {householdMembers.map(m => (
-                                                <div key={m.id} className="flex items-center gap-2">
-                                                    <div className="flex items-center gap-2 w-32">
-                                                        <Avatar url={m.photoURL} name={m.displayName} size="xs" />
-                                                        <span className="text-sm overflow-hidden text-ellipsis whitespace-nowrap">{m.displayName?.split(' ')[0]}</span>
-                                                    </div>
-                                                    <div className="relative flex-1">
-                                                        <span className="absolute left-3 top-2.5 text-slate-400 text-xs">€</span>
-                                                        <input
-                                                            type="number"
-                                                            step="0.01"
-                                                            value={customAmounts[m.id] || ''}
-                                                            onChange={(e) => handleCustomAmountChange(m.id, e.target.value)}
-                                                            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 pl-6 text-sm outline-none focus:border-emerald-500"
-                                                            placeholder="0.00"
-                                                        />
-                                                    </div>
-                                                </div>
-                                            ))}
-
-                                            {/* Validation Footer */}
-                                            <div className={`p-3 rounded-xl text-center text-sm font-bold flex justify-between items-center border ${isValidCustom ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-red-500/10 border-red-500/30 text-red-400'
-                                                }`}>
-                                                <span>Asignado: {customSum.toFixed(2)}€</span>
-                                                <span>Restante: {(Number(amount) - customSum).toFixed(2)}€</span>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Equal Split Grid (Only if Equal Mode) */}
-                                    {splitMode === 'equal' && (
-                                        <div className="grid grid-cols-2 gap-2">
-                                            {householdMembers.map(m => {
-                                                const isSelected = splitAmong.includes(m.id);
-                                                return (
-                                                    <button
-                                                        type="button"
-                                                        key={m.id}
-                                                        onClick={() => toggleSplitMember(m.id)}
-                                                        className={`flex items-center justify-between p-3 rounded-xl border transition-all ${isSelected ? 'bg-slate-800 border-emerald-500/50 text-white' : 'bg-slate-900 border-slate-800 text-slate-500 opacity-70'
-                                                            }`}
-                                                    >
-                                                        <div className="flex items-center gap-2">
-                                                            <Avatar url={m.photoURL} name={m.displayName} size="xs" />
-                                                            <span className="text-sm">{m.displayName?.split(' ')[0]}</span>
-                                                        </div>
-                                                        {isSelected && <Check size={16} className="text-emerald-500" />}
-                                                    </button>
-                                                )
-                                            })}
-                                        </div>
-                                    )}
-
+                                    {chargeSelector}
+                                    {splitControls}
                                     {/* Recurring Expense Toggle (only for new expenses) */}
                                     {!editingId && (
                                         <div className="space-y-3">
@@ -876,19 +896,20 @@ export default function Expenses() {
 
                                     <button
                                         type="submit"
-                                        disabled={splitMode === 'custom' && !isValidCustom}
-                                        className={`w-full font-bold py-3 rounded-xl transition-all shadow-lg ${splitMode === 'custom' && !isValidCustom
+                                        disabled={formBusy || (chargeTo !== 'common' && splitMode === 'custom' && !isValidCustom)}
+                                        className={`w-full font-bold py-3 rounded-xl transition-all shadow-lg ${formBusy || (chargeTo !== 'common' && splitMode === 'custom' && !isValidCustom)
                                             ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
                                             : isRecurring
                                                 ? 'bg-violet-500 text-white hover:bg-violet-600 shadow-violet-500/20'
                                                 : 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-emerald-500/20'
                                             }`}
                                     >
-                                        {editingId ? 'Guardar Cambios' : isRecurring ? '🔄 Crear Gasto Recurrente' : 'Guardar Gasto'}
+                                        {formBusy ? 'Guardando…' : editingId ? 'Guardar Cambios' : isRecurring ? '🔄 Crear Gasto Recurrente' : 'Guardar Gasto'}
                                     </button>
 
+                                    {formError && <p role="alert" className="text-rose-300 text-sm">{formError}</p>}
                                     {editingId && (
-                                        <button
+                                        <button disabled={formBusy}
                                             type="button"
                                             onClick={handleDelete}
                                             className="w-full text-red-500 text-xs font-bold py-3 hover:bg-red-500/10 rounded-xl transition-colors flex items-center justify-center gap-2"
@@ -896,7 +917,7 @@ export default function Expenses() {
                                             <Trash size={14} /> Eliminar Gasto
                                         </button>
                                     )}
-                                </div>
+                                </fieldset>
                             </form>
                         </div>
                     )}
@@ -979,6 +1000,7 @@ export default function Expenses() {
                                                         <span>{format(parseISO(exp.date), 'd MMM', { locale: es })}</span>
                                                         <span>•</span>
                                                         <span>Pagó {payer ? payer.displayName?.split(' ')[0] : '???'}</span>
+                                                        {isCommonExpense(exp) && <span className="text-sky-300">· A cargo de la CM</span>}
                                                     </div>
                                                 </div>
                                             </div>
@@ -1572,15 +1594,16 @@ export default function Expenses() {
                     {activeTab === 'balances' && (
                         <div className="space-y-6 animate-in slide-in-from-left-4">
 
+                            <CommonAccountBalances key={`${household?.id}-${user?.uid}-${format(currentMonth, 'yyyy-MM')}`} month={currentMonth} expenses={expenses} members={householdMembers} householdId={household?.id} userId={user?.uid} />
                             {/* Balances Bars */}
                             <div className="bg-surface p-6 rounded-2xl border border-slate-700 space-y-4">
                                 <h3 className="font-bold text-lg flex items-center gap-2">
-                                    <TrendingUp className="text-emerald-500" /> Balance Mensual
+                                    <TrendingUp className="text-emerald-500" /> Entre personas · Mes
                                 </h3>
 
                                 {isSettled && (
                                     <div className="bg-green-500/20 text-green-400 p-3 rounded-xl text-sm font-bold flex items-center gap-2">
-                                        <Check size={16} /> Este mes está liquidado.
+                                        <Check size={16} /> Este mes está liquidado entre personas.
                                     </div>
                                 )}
 
@@ -1668,6 +1691,7 @@ export default function Expenses() {
                                         setAmount("");
                                         setCategory("");
                                         setPayerId(user.uid);
+                                        setChargeTo('people'); setFormError('');
                                         setSplitAmong(householdMembers.map(m => m.id));
                                         setSplitMode('equal');
                                         setCustomAmounts({});
@@ -1693,25 +1717,30 @@ export default function Expenses() {
                                             amount: Number(amount),
                                             category,
                                             payerId,
-                                            splitAmong,
-                                            splitMode,
-                                            customAmounts: splitMode === 'custom' ? customAmounts : {},
+                                            ...expenseAllocation({ chargeTo, splitAmong, splitMode, customAmounts }, householdMembers),
                                             startMonth: recurringStartMonth,
                                             endMonth: recurringEndMonth || null
                                         };
 
-                                        if (editingRecurringId) {
-                                            await updateRecurringExpense(editingRecurringId, data);
-                                        } else {
-                                            await addRecurringExpense(data);
-                                            // Generate for current month immediately
-                                            await generateRecurringExpenses(new Date());
-                                        }
-                                        setShowRecurringForm(false);
-                                        setEditingRecurringId(null);
+                                        if (formBusy) return;
+                                        setFormBusy(true); setFormError('');
+                                        try {
+                                            validateExpenseAllocation(data);
+                                            if (editingRecurringId) {
+                                                await updateRecurringExpense(editingRecurringId, data);
+                                            } else {
+                                                await addRecurringExpense(data);
+                                                // Generate for current month immediately
+                                                await generateRecurringExpenses(new Date());
+                                            }
+                                            setShowRecurringForm(false);
+                                            setEditingRecurringId(null);
+                                        } catch (error) { setFormError(error.message || 'No se pudo guardar la regla.'); }
+                                        finally { setFormBusy(false); }
                                     }}
                                     className="bg-violet-500/5 border border-violet-500/20 rounded-2xl p-5 space-y-4 animate-in slide-in-from-top-4"
                                 >
+                                    {chargeSelector}
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                         <div>
                                             <label className="block text-xs font-medium text-slate-400 mb-1">Concepto *</label>
@@ -1739,7 +1768,7 @@ export default function Expenses() {
                                             value={category} onChange={e => setCategory(e.target.value)} required
                                         >
                                             <option value="" disabled>Selecciona una categoría</option>
-                                            {categories.map(cat => (
+                                            {categories.filter(cat => chargeTo !== 'common' || cat.id !== 'settlement').map(cat => (
                                                 <option key={cat.id} value={cat.id}>{cat.icon} {cat.name}</option>
                                             ))}
                                         </select>
@@ -1783,30 +1812,9 @@ export default function Expenses() {
                                         </div>
                                     </div>
 
-                                    {/* Split Among */}
-                                    <div>
-                                        <label className="block text-xs font-medium text-slate-400 mb-1">Para quién</label>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            {householdMembers.map(m => {
-                                                const isSelected = splitAmong.includes(m.id);
-                                                return (
-                                                    <button
-                                                        type="button" key={m.id}
-                                                        onClick={() => toggleSplitMember(m.id)}
-                                                        className={`flex items-center justify-between p-2.5 rounded-xl border transition-all text-sm ${isSelected ? 'bg-slate-800 border-violet-500/50 text-white' : 'bg-slate-900 border-slate-800 text-slate-500 opacity-70'}`}
-                                                    >
-                                                        <div className="flex items-center gap-2">
-                                                            <Avatar url={m.photoURL} name={m.displayName} size="xs" />
-                                                            <span>{m.displayName?.split(' ')[0]}</span>
-                                                        </div>
-                                                        {isSelected && <Check size={14} className="text-violet-400" />}
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-
-                                    <button
+                                    {splitControls}
+                                    {formError && <p role="alert" className="text-rose-300 text-sm">{formError}</p>}
+                                    <button disabled={formBusy}
                                         type="submit"
                                         className="w-full bg-violet-500 hover:bg-violet-600 text-white font-bold py-3 rounded-xl transition-colors shadow-lg shadow-violet-500/20"
                                     >
@@ -1851,6 +1859,7 @@ export default function Expenses() {
                                                                 <span className="bg-slate-800 px-1.5 py-0.5 rounded">{cat?.name || 'Otro'}</span>
                                                                 <span>•</span>
                                                                 <span>Paga {payer?.displayName?.split(' ')[0] || '???'}</span>
+                                                                {rule.chargeTo === 'common' && <span className="text-sky-300">· A cargo de la CM</span>}
                                                                 <span>•</span>
                                                                 <span className="flex items-center gap-0.5">
                                                                     {isIndividual ? <User size={10} /> : <Users size={10} />}
@@ -1880,6 +1889,7 @@ export default function Expenses() {
                                                             setAmount(rule.amount);
                                                             setCategory(rule.category);
                                                             setPayerId(rule.payerId);
+                                                            setChargeTo(rule.chargeTo || 'people'); setFormError('');
                                                             setSplitAmong(rule.splitAmong || []);
                                                             setSplitMode(rule.splitMode || 'equal');
                                                             setCustomAmounts(rule.customAmounts || {});

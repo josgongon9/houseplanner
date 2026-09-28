@@ -100,4 +100,26 @@ describe('Concurrent recurring expense generation', () => {
         expect(database.expenses()).toHaveLength(5);
         expect(new Set(database.expenses().map(([ref]) => ref)).size).toBe(5);
     });
+
+    it.each(['people', 'common'])('retries with the latest destination %s during generation', async chargeTo => {
+        const database = concurrentDatabase(2, put => put('recurringExpenses/r1', { ...rule, chargeTo, payerId: 'u2' }));
+        await Promise.all([generateDueRecurringExpenses('h1', month, month), generateDueRecurringExpenses('h1', month, month)]);
+        expect(database.expenses()).toHaveLength(1);
+        expect(database.expenses()[0][1]).toMatchObject({ chargeTo, payerId: 'u2' });
+    });
+
+    it.each([['people', 'common'], ['common', 'people']])('keeps existing expenses when the rule changes from %s to %s', async (from, to) => {
+        const database = concurrentDatabase(1);
+        database.put('recurringExpenses/r1', { ...rule, chargeTo: from });
+        await generateDueRecurringExpenses('h1', month, month);
+        const [oldRef, oldExpense] = database.expenses()[0];
+        database.put(oldRef, { ...oldExpense, reimbursements: [{ id: 'payment', amountCents: 1000 }] });
+        database.put('recurringExpenses/r1', { ...rule, chargeTo: to, amount: 900 });
+        await generateDueRecurringExpenses('h1', month, month);
+        const next = new Date(2026, 10, 1);
+        await generateDueRecurringExpenses('h1', next, next);
+        expect(database.expenses()).toHaveLength(2);
+        expect(database.values.get(oldRef)).toMatchObject({ chargeTo: from, amount: 800, reimbursements: [{ id: 'payment', amountCents: 1000 }] });
+        expect(database.expenses().find(([ref]) => ref !== oldRef)[1]).toMatchObject({ chargeTo: to, amount: 900 });
+    });
 });

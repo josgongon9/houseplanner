@@ -1,11 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { saveBankImport, removeBankImport } from './bankImportRepository';
+import { saveBankImport, removeBankImport, updateBankEntryCategory } from './bankImportRepository';
 import { runTransaction, deleteDoc } from './firebase';
 vi.mock('./firebase', () => ({ db: {}, doc: (_, ...parts) => parts.join('/'), runTransaction: vi.fn(), deleteDoc: vi.fn() }));
 const report = { fileName: 'test.xlsx', entries: [{ title: 'Compra', date: '2026-09-19', amount: 25, category: 'other' }] };
 
 describe('Atomic bank reports, isolated from manual expenses', () => {
     beforeEach(() => vi.resetAllMocks());
+    it('changes only the selected movement using the latest report', async () => {
+        const update = vi.fn();
+        const entries = [report.entries[0], { ...report.entries[0], title: 'Reembolso' }];
+        runTransaction.mockImplementation(async (_, action) => action({ get: async () => ({ exists: () => true, data: () => ({ entries }) }), update }));
+        await updateBankEntryCategory('h1', 'r1', 1, 'cm_reimbursement');
+        expect(update).toHaveBeenCalledWith('households/h1/bankExpenseImports/r1', { entries: [entries[0], { ...entries[1], category: 'cm_reimbursement' }] });
+    });
     it('writes one report in the household bank collection, never the expense collection', async () => {
         const set = vi.fn();
         runTransaction.mockImplementation(async (_, action) => action({ get: async () => ({ exists: () => false }), set }));

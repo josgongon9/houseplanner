@@ -6,6 +6,7 @@ import {
 } from "../lib/firebase";
 
 import { generateDueRecurringExpenses } from '../lib/recurringExpenses';
+import { editExpenseRecord, deleteExpenseRecord, editRecurringRecord } from '../lib/expenseRepository';
 import useRecurringSchedule from '../hooks/useRecurringSchedule';
 
 const StoreContext = createContext();
@@ -355,7 +356,7 @@ export const StoreProvider = ({ children }) => {
     };
 
     // Expenses Actions
-    const addExpense = async (title, amount, category, payerId, splitAmong, splitMode = 'equal', customAmounts = {}, date = null) => {
+    const addExpense = async (title, amount, category, payerId, splitAmong, splitMode = 'equal', customAmounts = {}, date = null, chargeTo = 'people') => {
         if (!user || !household) return;
         await addDoc(collection(db, "expenses"), {
             title,
@@ -366,7 +367,8 @@ export const StoreProvider = ({ children }) => {
             payerId: payerId || user.uid, // Who paid?
             splitAmong: splitAmong || householdMembers.map(m => m.id), // Who is is for? (Array of IDs)
             splitMode,
-            customAmounts
+            customAmounts,
+            chargeTo
         });
     };
 
@@ -409,15 +411,13 @@ export const StoreProvider = ({ children }) => {
 
     const updateExpense = async (id, data) => {
         if (!user || !household) return;
-        const payload = { ...data };
-        if (payload.amount) payload.amount = Number(payload.amount);
-        await updateDoc(doc(db, "expenses", id), payload);
-    }
+        await editExpenseRecord(household.id, id, data);
+    };
 
-    const deleteExpense = async (id) => {
+    const deleteExpense = async id => {
         if (!user || !household) return;
-        await deleteDoc(doc(db, "expenses", id));
-    }
+        await deleteExpenseRecord(household.id, id);
+    };
 
     // Recurring Expenses Actions
     const addRecurringExpense = async (data) => {
@@ -428,6 +428,7 @@ export const StoreProvider = ({ children }) => {
             category: data.category,
             payerId: data.payerId || user.uid,
             splitAmong: data.splitAmong || [],
+            chargeTo: data.chargeTo || 'people',
             splitMode: data.splitMode || 'equal',
             customAmounts: data.customAmounts || {},
             householdId: household.id,
@@ -442,9 +443,7 @@ export const StoreProvider = ({ children }) => {
 
     const updateRecurringExpense = async (id, data) => {
         if (!user || !household) return;
-        const payload = { ...data };
-        if (payload.amount) payload.amount = Number(payload.amount);
-        await updateDoc(doc(db, "recurringExpenses", id), payload);
+        await editRecurringRecord(household.id, id, data);
     };
 
     const deleteRecurringExpense = async (id) => {

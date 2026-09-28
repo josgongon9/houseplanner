@@ -27,6 +27,7 @@ export async function generateDueRecurringExpenses(householdId, monthDate = new 
                 title: rule.title, amount: Number(rule.amount), category: rule.category,
                 date: new Date(monthDate.getFullYear(), monthDate.getMonth(), 1, 12).toISOString(),
                 householdId, payerId: rule.payerId, splitAmong: rule.splitAmong,
+                chargeTo: rule.chargeTo || 'people',
                 splitMode: rule.splitMode || 'equal', customAmounts: rule.customAmounts || {},
                 recurringId: ruleDoc.id, recurringMonth: monthKey
             });
