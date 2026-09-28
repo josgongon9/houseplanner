@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { format, isSameMonth, parseISO } from 'date-fns';
-import { Check, TrendingUp, Wallet, User } from 'lucide-react';
+import { Check, TrendingUp, Wallet } from 'lucide-react';
+import Avatar from './Avatar';
 import { isCommonExpense, pendingCents } from '../lib/commonAccount';
 import { settleCommonMonth, undoCommonSettlement } from '../lib/commonAccountRepository';
 
@@ -11,7 +12,9 @@ export default function CommonAccountBalances({ expenses, members, householdId, 
     const [error, setError] = useState('');
     const common = expenses.filter(expense => isCommonExpense(expense) && isSameMonth(parseISO(expense.date), month));
     const people = [...new Set([...members.map(member => member.id), ...common.map(expense => expense.payerId)])];
-    const name = id => members.find(member => member.id === id)?.displayName || 'Ex-miembro';
+    const member = id => members.find(member => member.id === id);
+    const name = id => member(id)?.displayName || 'Ex-miembro';
+    const shortName = id => name(id).split(' ')[0];
     const balances = people.map(id => ({ id, amount: common.filter(expense => expense.payerId === id).reduce((sum, expense) => sum + pendingCents(expense), 0) }));
     const pending = balances.filter(balance => balance.amount > 0);
     const history = new Map();
@@ -43,8 +46,8 @@ export default function CommonAccountBalances({ expenses, members, householdId, 
             <h3 className="font-bold text-lg flex items-center gap-2"><TrendingUp className="text-emerald-500" />Cuenta común · Mes</h3>
             {!pending.length && <div className="bg-green-500/20 text-green-400 p-3 rounded-xl text-sm font-bold flex items-center gap-2"><Check size={16} />Este mes está liquidado con la CM.</div>}
             <div className="space-y-4">{balances.map(balance => <div key={balance.id} className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center shrink-0"><User size={20} /></div>
-                <div className="flex-1 min-w-0"><div className="flex justify-between gap-3 items-end mb-1"><span className="font-medium text-sm break-words">{name(balance.id)}</span><span className={`font-bold whitespace-nowrap ${balance.amount ? 'text-green-400' : 'text-slate-500'}`}>{balance.amount ? '+' : ''}{euro(balance.amount)}</span></div>
+                <Avatar url={member(balance.id)?.photoURL} name={name(balance.id)} />
+                <div className="flex-1 min-w-0"><div className="flex justify-between gap-3 items-end mb-1"><span className="font-medium text-sm break-words">{shortName(balance.id)}</span><span className={`font-bold whitespace-nowrap ${balance.amount ? 'text-green-400' : 'text-slate-500'}`}>{balance.amount ? '+' : ''}{euro(balance.amount)}</span></div>
                     {balance.amount > 0 && <div className="h-2 bg-slate-800 rounded-full overflow-hidden"><div className="h-full bg-green-500 rounded-full" style={{ width: `${Math.min(balance.amount / 100 * 3, 150)}px` }} /></div>}
                 </div>
             </div>)}</div>
@@ -53,7 +56,7 @@ export default function CommonAccountBalances({ expenses, members, householdId, 
         <div className="space-y-2"><h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider pl-2">Cómo liquidar la cuenta común</h3>
             {!pending.length && <div className="p-4 rounded-xl border border-dashed border-slate-700 text-center text-slate-500 text-sm">Sin pagos pendientes de la CM</div>}
             {pending.map(balance => <div key={balance.id} className="bg-surface p-4 rounded-xl border border-slate-700 flex flex-col gap-3 shadow-sm">
-                <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2 min-w-0 flex-wrap"><Wallet size={16} className="shrink-0" /><span className="font-bold text-slate-200 text-sm">CM</span><span className="text-xs text-slate-500">paga a</span><span className="font-bold text-slate-200 text-sm break-words">{name(balance.id)}</span></div><div className="text-xl font-bold text-white whitespace-nowrap">{euro(balance.amount)}</div></div>
+                <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2 min-w-0 flex-wrap"><div className="flex items-center gap-1"><div className="w-6 h-6 shrink-0 bg-slate-700 rounded-full flex items-center justify-center" aria-label="Cuenta común"><Wallet size={14} /></div><span className="font-bold text-slate-200 text-sm">CM</span></div><span className="text-xs text-slate-500">paga a</span><span className="font-bold text-slate-200 text-sm break-words">{name(balance.id)}</span></div><div className="text-xl font-bold text-white whitespace-nowrap">{euro(balance.amount)}</div></div>
                 <button disabled={busy} onClick={() => settle(balance)} className="w-full py-2 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white rounded-lg text-xs font-bold transition-colors disabled:opacity-40">{busy ? 'GUARDANDO…' : 'MARCAR COMO PAGADO'}</button>
             </div>)}
         </div>

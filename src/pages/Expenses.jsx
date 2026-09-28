@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useStore } from '../context/StoreContext';
 import { expenseAllocation, validateExpenseAllocation } from '../lib/expenseAllocation';
+import Avatar from '../components/Avatar';
 import CommonAccountBalances from '../components/CommonAccountBalances';
 import { isCommonExpense, pendingCents } from '../lib/commonAccount';
 import BankImports from '../components/BankImports';
@@ -1594,7 +1595,7 @@ export default function Expenses() {
                     {activeTab === 'balances' && (
                         <div className="space-y-6 animate-in slide-in-from-left-4">
 
-                            <CommonAccountBalances key={`${household?.id}-${user?.uid}-${format(currentMonth, 'yyyy-MM')}`} month={currentMonth} expenses={expenses} members={householdMembers} householdId={household?.id} userId={user?.uid} />
+                            <section aria-label="Saldos entre personas" className="space-y-4">
                             {/* Balances Bars */}
                             <div className="bg-surface p-6 rounded-2xl border border-slate-700 space-y-4">
                                 <h3 className="font-bold text-lg flex items-center gap-2">
@@ -1617,10 +1618,10 @@ export default function Expenses() {
                                         return (
                                             <div key={b.uid} className="flex items-center gap-3">
                                                 <Avatar url={b.member?.photoURL} name={b.member?.displayName} />
-                                                <div className="flex-1">
-                                                    <div className="flex justify-between items-end mb-1">
-                                                        <span className="font-medium text-sm">{b.member?.displayName?.split(' ')[0]}</span>
-                                                        <span className={`font-bold ${isPositive ? 'text-green-400' : isNegative ? 'text-red-400' : 'text-slate-500'}`}>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex justify-between gap-3 items-end mb-1">
+                                                        <span className="font-medium text-sm break-words">{b.member?.displayName?.split(' ')[0]}</span>
+                                                        <span className={`font-bold whitespace-nowrap ${isPositive ? 'text-green-400' : isNegative ? 'text-red-400' : 'text-slate-500'}`}>
                                                             {isPositive ? '+' : ''}{b.amount.toFixed(2)}€
                                                         </span>
                                                     </div>
@@ -1650,8 +1651,8 @@ export default function Expenses() {
                                 ) : (
                                     transactions.map((t, idx) => (
                                         <div key={idx} className="bg-surface p-4 rounded-xl border border-slate-700 flex flex-col gap-3 shadow-sm">
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div className="flex items-center gap-2 min-w-0 flex-wrap">
                                                     <div className="flex items-center gap-1">
                                                         <Avatar url={t.from?.photoURL} name={t.from?.displayName} size="xs" />
                                                         <span className="font-bold text-slate-200 text-sm">{t.from?.displayName?.split(' ')[0]}</span>
@@ -1662,7 +1663,7 @@ export default function Expenses() {
                                                         <span className="font-bold text-slate-200 text-sm">{t.to?.displayName?.split(' ')[0]}</span>
                                                     </div>
                                                 </div>
-                                                <div className="text-xl font-bold text-white">{t.amount.toFixed(2)}€</div>
+                                                <div className="text-xl font-bold text-white whitespace-nowrap">{t.amount.toFixed(2)}€</div>
                                             </div>
                                             <button
                                                 onClick={() => handleSettleUp(t.from, t.to, t.amount)}
@@ -1674,6 +1675,8 @@ export default function Expenses() {
                                     ))
                                 )}
                             </div>
+                            </section>
+                            <CommonAccountBalances key={`${household?.id}-${user?.uid}-${format(currentMonth, 'yyyy-MM')}`} month={currentMonth} expenses={expenses} members={householdMembers} householdId={household?.id} userId={user?.uid} />
                         </div>
                     )}
 
@@ -1935,10 +1938,4 @@ export default function Expenses() {
 
         </div>
     );
-}
-
-const Avatar = ({ url, name, size = 'md' }) => {
-    const s = size === 'xs' ? 'w-6 h-6' : 'w-10 h-10';
-    if (!url) return <div className={`${s} bg-slate-700 rounded-full flex items-center justify-center`}><User size={size === 'xs' ? 14 : 20} /></div>
-    return <img src={url} alt={name} className={`${s} rounded-full border border-slate-600`} />
 }
