@@ -52,7 +52,7 @@ describe('Finances automatic stock amounts', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Inversiones' }));
         expect(within(screen.getByText('Plusvalías Ventas').parentElement).getByText('100.00€')).toBeInTheDocument();
         expect(within(screen.getByText('Pérdidas Ventas').parentElement).getByText('-30.00€')).toBeInTheDocument();
-        expect(within(screen.getByText('Total Ventas').parentElement).getByText('70.00€')).toBeInTheDocument();
+        expect(within(screen.getByText('Total Ventas').closest('button')).getByText('70.00€')).toBeInTheDocument();
     });
 
     it('waits for the new year budget and investments before allowing edits', () => {

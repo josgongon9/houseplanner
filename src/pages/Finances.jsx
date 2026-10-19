@@ -890,34 +890,44 @@ const InvestmentsView = ({ year, stocks, dividends, allStocks, allDividends, use
 
     return (
         <div className="space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                <div onClick={() => setInvTab('stocks')} className={`flex-1 p-4 rounded-xl border cursor-pointer transition-all ${invTab === 'stocks' ? 'bg-amber-500/10 border-amber-500 ring-1 ring-amber-500' : 'bg-surface border-slate-700 hover:border-slate-500'}`}>
-                    <div className="flex justify-between items-start">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                <button
+                    type="button"
+                    onClick={() => setInvTab('stocks')}
+                    aria-pressed={invTab === 'stocks'}
+                    className={`col-span-2 lg:row-span-2 flex flex-col items-start justify-between gap-6 p-5 sm:p-6 rounded-2xl border text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${invTab === 'stocks' ? 'border-amber-500/70 bg-gradient-to-br from-amber-500/10 via-slate-800 to-slate-900 shadow-lg shadow-amber-950/10' : 'border-slate-600 bg-surface hover:border-amber-500/50'}`}
+                >
+                    <div className="flex w-full items-center justify-between gap-3">
+                        <span className="text-sm font-bold text-slate-100">Total Ventas</span>
+                        <TrendingUp size={20} className={invTab === 'stocks' ? 'text-amber-400' : 'text-slate-500'} />
+                    </div>
+                    <p className={`text-4xl sm:text-5xl font-bold tracking-tight tabular-nums break-all ${totalStockProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{totalStockProfit.toFixed(2)}€</p>
+                    <div className="w-full flex flex-wrap items-end justify-between gap-4 border-t border-slate-600/40 pt-4">
                         <div>
-                            <h3 className="font-medium text-slate-400 text-sm">Plusvalías Ventas</h3>
-                            <p className="text-2xl font-bold text-green-400">{totalStockGains.toFixed(2)}€</p>
+                            <span className="block text-xs text-slate-400 mb-1">Total Invertido</span>
+                            <span className="text-sm font-semibold text-slate-200 tabular-nums">{totalInvested.toFixed(2)}€</span>
                         </div>
+                        <span className={`text-xs font-bold rounded-lg px-2.5 py-1.5 tabular-nums ${totalROI >= 0 ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>ROI: {totalROI.toFixed(2)}%</span>
                     </div>
-                    <div className="mt-2 pt-2 border-t border-slate-700/50 flex justify-between text-xs">
-                        <span className="text-slate-500">Total Invertido:</span>
-                        <span className="text-slate-300 font-mono">{totalInvested.toFixed(2)}€</span>
-                    </div>
-                </div>
-                <div onClick={() => setInvTab('stocks')} className="p-4 rounded-xl border border-slate-700 bg-surface cursor-pointer hover:border-slate-500">
-                    <h3 className="font-medium text-slate-400 text-sm">Pérdidas Ventas</h3>
-                    <p className="text-2xl font-bold text-red-400">{totalStockLosses > 0 ? '-' : ''}{totalStockLosses.toFixed(2)}€</p>
-                </div>
-                <div onClick={() => setInvTab('stocks')} className="p-4 rounded-xl border border-slate-700 bg-surface cursor-pointer hover:border-slate-500">
-                    <h3 className="font-medium text-slate-400 text-sm">Total Ventas</h3>
-                    <p className={`text-2xl font-bold ${totalStockProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{totalStockProfit.toFixed(2)}€</p>
-                    <p className="text-xs text-slate-400 mt-2">ROI: {totalROI.toFixed(2)}%</p>
-                </div>
-                <div onClick={() => setInvTab('dividends')} className={`flex-1 p-4 rounded-xl border cursor-pointer transition-all ${invTab === 'dividends' ? 'bg-amber-500/10 border-amber-500 ring-1 ring-amber-500' : 'bg-surface border-slate-700 hover:border-slate-500'}`}>
-                    <h3 className="font-medium text-slate-400 text-sm">Total Dividendos</h3>
-                    <p className="text-2xl font-bold text-green-400">{totalDivProfit.toFixed(2)}€</p>
-                </div>
+                </button>
+                <button type="button" onClick={() => setInvTab('stocks')} className="min-w-0 p-4 rounded-2xl border border-slate-700 bg-surface text-left transition-colors hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400">
+                    <span className="block font-medium text-slate-400 text-xs sm:text-sm">Plusvalías Ventas</span>
+                    <p className="mt-2 text-xl sm:text-2xl font-semibold text-green-400 tabular-nums break-all">{totalStockGains.toFixed(2)}€</p>
+                </button>
+                <button type="button" onClick={() => setInvTab('stocks')} className="min-w-0 p-4 rounded-2xl border border-slate-700 bg-surface text-left transition-colors hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400">
+                    <span className="block font-medium text-slate-400 text-xs sm:text-sm">Pérdidas Ventas</span>
+                    <p className="mt-2 text-xl sm:text-2xl font-semibold text-red-400 tabular-nums break-all">{totalStockLosses > 0 ? '-' : ''}{totalStockLosses.toFixed(2)}€</p>
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setInvTab('dividends')}
+                    aria-pressed={invTab === 'dividends'}
+                    className={`col-span-2 flex flex-wrap items-center justify-between gap-3 p-4 rounded-2xl border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${invTab === 'dividends' ? 'bg-amber-500/10 border-amber-500/70' : 'bg-surface border-slate-700 hover:border-slate-500'}`}
+                >
+                    <span className="font-medium text-slate-400 text-sm">Total Dividendos</span>
+                    <p className="text-xl sm:text-2xl font-semibold text-green-400 tabular-nums break-all">{totalDivProfit.toFixed(2)}€</p>
+                </button>
             </div>
-
             {/* ACCUMULATED ALL-TIME CARD */}
             <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/40 via-slate-900/60 to-purple-950/40 overflow-hidden shadow-xl shadow-indigo-500/5">
                 {/* Header — clickable to toggle breakdown */}
