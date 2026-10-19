@@ -23,6 +23,55 @@ describe('Expenses Financial Core', () => {
         { id: 'u3', displayName: 'Lucas' }
     ];
 
+    it.each([0, 4999, 5000])('shows pending CM warning until fully reimbursed (%i cents)', reimbursed => {
+        StoreContext.useStore.mockReturnValue({
+            expenses: [{ id: 'cm1', title: 'Compra CM', amount: 50, payerId: 'u1', chargeTo: 'common',
+                category: 'home', splitAmong: [], date: new Date().toISOString(),
+                reimbursements: reimbursed ? [{ id: 'r1', amountCents: reimbursed, date: new Date().toISOString().slice(0, 10) }] : [] }],
+            recurringExpenses: [], householdMembers: members, user: { uid: 'u1' }, household: { expenseCategories: [] },
+        });
+        render(<Expenses />);
+        if (reimbursed < 5000) expect(screen.getByLabelText('Importes pendientes')).toBeInTheDocument();
+        else expect(screen.queryByLabelText('Importes pendientes')).not.toBeInTheDocument();
+    });
+
+    it.each([
+        { amount: 0.03, splitAmong: ['u1', 'u2'] },
+        { amount: 0.05, splitAmong: ['u1', 'u2', 'u3'] },
+        { amount: 10, splitAmong: ['u3', 'u1', 'u2'] },
+        { amount: 19.99, splitAmong: ['u1', 'u2'] },
+    ])('settles $amount among $splitAmong without residual cents', ({ amount, splitAmong }) => {
+        vi.spyOn(window, 'confirm').mockReturnValue(true);
+        const addExpense = vi.fn();
+        let expenses = [{ id: 'e1', title: 'Compra', amount, payerId: 'u1', splitAmong, date: new Date().toISOString() }];
+        const store = { recurringExpenses: [], householdMembers: members, user: { uid: 'u1' },
+            addExpense, household: { expenseCategories: [] } };
+        StoreContext.useStore.mockReturnValue({ ...store, expenses });
+        const { rerender } = render(<Expenses />);
+        fireEvent.click(screen.getByText(/Saldos/i));
+
+        for (let payment = 0; payment < members.length; payment++) {
+            const buttons = screen.queryAllByRole('button', { name: 'MARCAR COMO PAGADO' });
+            if (!buttons.length) break;
+            fireEvent.click(buttons[0]);
+            const [title, paid, category, payerId, beneficiaries, splitMode, customAmounts, date] = addExpense.mock.lastCall;
+            expenses = [...expenses, { id: `payment-${payment}`, title, amount: paid, category, payerId,
+                splitAmong: beneficiaries, splitMode, customAmounts, date }];
+            StoreContext.useStore.mockReturnValue({ ...store, expenses });
+            rerender(<Expenses />);
+        }
+
+        const balances = within(screen.getByRole('region', { name: 'Saldos entre personas' }));
+        expect(balances.getAllByText('0.00€')).toHaveLength(members.length);
+        expect(screen.queryByRole('button', { name: 'MARCAR COMO PAGADO' })).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('Importes pendientes')).not.toBeInTheDocument();
+        // Reordering beneficiaries must never change who receives an indivisible cent.
+        expenses = expenses.map(expense => ({ ...expense, splitAmong: [...expense.splitAmong].reverse() }));
+        StoreContext.useStore.mockReturnValue({ ...store, expenses });
+        rerender(<Expenses />);
+        expect(balances.getAllByText('0.00€')).toHaveLength(members.length);
+    });
+
     it('recalculates both balances after moving an expense and changing its payer without changing total spending', () => {
         const expense = { id: 'e1', title: 'Compra', amount: 80, category: 'home', payerId: 'u1', splitAmong: ['u1', 'u2'], date: new Date().toISOString() };
         const store = { expenses: [expense], recurringExpenses: [], householdMembers: members, user: { uid: 'u1' }, household: { id: 'h1' } };

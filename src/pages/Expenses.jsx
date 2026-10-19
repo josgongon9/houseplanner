@@ -270,7 +270,7 @@ export default function Expenses() {
 
         monthlyExpenses.forEach(exp => {
             if (isCommonExpense(exp)) return;
-            const cost = Number(exp.amount);
+            const cost = Math.round(Number(exp.amount) * 100);
             const payer = exp.payerId;
             const beneficiaries = exp.splitAmong || [];
 
@@ -280,14 +280,17 @@ export default function Expenses() {
             if (exp.splitMode === 'custom' && exp.customAmounts) {
                 Object.entries(exp.customAmounts).forEach(([uid, amt]) => {
                     if (!balanceMap.hasOwnProperty(uid)) balanceMap[uid] = 0;
-                    balanceMap[uid] -= Number(amt);
+                    balanceMap[uid] -= Math.round(Number(amt) * 100);
                 });
             } else {
                 if (beneficiaries.length === 0) return;
-                const splitAmount = cost / beneficiaries.length;
-                beneficiaries.forEach(uid => {
+                // Keep the sum exact: allocate indivisible cents in stable ID order.
+                const orderedBeneficiaries = [...beneficiaries].sort();
+                const splitAmount = Math.floor(cost / orderedBeneficiaries.length);
+                const remainder = cost - splitAmount * orderedBeneficiaries.length;
+                orderedBeneficiaries.forEach((uid, index) => {
                     if (!balanceMap.hasOwnProperty(uid)) balanceMap[uid] = 0;
-                    balanceMap[uid] -= splitAmount;
+                    balanceMap[uid] -= splitAmount + (index < remainder ? 1 : 0);
                 });
             }
         });
@@ -295,7 +298,7 @@ export default function Expenses() {
         return Object.entries(balanceMap)
             .map(([uid, amount]) => ({
                 uid,
-                amount: Math.round(amount * 100) / 100,
+                amount: amount / 100,
                 member: householdMembers.find(m => m.id === uid) || { id: uid, displayName: 'Ex-miembro' }
             }))
             .sort((a, b) => b.amount - a.amount);
@@ -344,7 +347,8 @@ export default function Expenses() {
         .reduce((acc, curr) => acc + Number(curr.amount), 0);
 
     const isSettled = transactions.length === 0 && monthlyExpenses.length > 0;
-    const isMonthSettled = isSettled && !monthlyExpenses.some(expense => pendingCents(expense) > 0);
+    const hasPendingBalances = transactions.length > 0 || monthlyExpenses.some(expense => pendingCents(expense) > 0);
+    const isMonthSettled = isSettled && !hasPendingBalances;
 
     // --- YEAR OVERVIEW DATA ---
     const yearMonths = useMemo(() => {
@@ -761,7 +765,7 @@ export default function Expenses() {
                                 onClick={() => setActiveTab('balances')}
                                 className={`shrink-0 sm:flex-1 min-h-[44px] px-3 py-2 text-sm whitespace-nowrap font-bold rounded-lg transition-all ${activeTab === 'balances' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                             >
-                                Saldos {transactions.length > 0 && <span className="ml-1 w-2 h-2 bg-red-500 rounded-full inline-block"></span>}
+                                Saldos {hasPendingBalances && <span aria-label="Importes pendientes" className="ml-1 w-2 h-2 bg-red-500 rounded-full inline-block"></span>}
                             </button>
                             <button
                                 onClick={() => setActiveTab('recurring')}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../context/StoreContext';
 import MoneyOrganization from '../components/MoneyOrganization';
+import { stockTotals, withStockBudget } from '../lib/investmentBudget';
 import { db, doc, getDoc, setDoc, onSnapshot, updateDoc, collection, addDoc, query, where, orderBy, getDocs, deleteDoc, runTransaction } from '../lib/firebase';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -23,15 +24,18 @@ export default function Finances() {
     };
 
     // Data State
-    const [financeData, setFinanceData] = useState(null); // { incomeCategories: [], expenseCategories: [], monthly: { 0: { incomes: {}, expenses: {} }, ... } }
+    const [storedFinanceData, setFinanceData] = useState(null);
     const [stocks, setStocks] = useState([]);
     const [dividends, setDividends] = useState([]);
     const [savings, setSavings] = useState([]);
     const [allStocks, setAllStocks] = useState([]);
     const [allDividends, setAllDividends] = useState([]);
+    const [loadedPeriods, setLoadedPeriods] = useState({});
+    const period = `${user?.uid}-${year}`;
+    const yearReady = ['budget', 'stocks', 'dividends'].every(key => loadedPeriods[key] === period);
+    const financeData = useMemo(() => withStockBudget(storedFinanceData, stocks), [storedFinanceData, stocks]);
 
     // UI State
-    const [isLoading, setIsLoading] = useState(true);
     const [showConfig, setShowConfig] = useState(false); // Modal to configure categories
     const [showControls, setShowControls] = useState(false); // Toggle for top controls
 
@@ -39,7 +43,6 @@ export default function Finances() {
     useEffect(() => {
         if (!user) return;
 
-        setIsLoading(true);
         // We will store finances in a subcollection 'finances' under user, document ID is the year.
         // Actually, user wanted separation by years.
         // Structure: users/{uid}/finance_years/{year} -> Contains monthly data and categories snapshot?
@@ -59,7 +62,7 @@ export default function Finances() {
                     monthly: {} // index 0-11
                 });
             }
-            setIsLoading(false);
+            setLoadedPeriods(previous => ({ ...previous, budget: period }));
         });
 
         // Fetch Investments (Global or Yearly? Usually tax is yearly. Let's filter by year in memory or query)
@@ -74,6 +77,7 @@ export default function Finances() {
         // For now let's just use onSnapshot for consistency
         const unsubStocks = onSnapshot(stockQ, (snap) => {
             setStocks(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+            setLoadedPeriods(previous => ({ ...previous, stocks: period }));
         });
 
         const dividendQ = query(
@@ -83,6 +87,7 @@ export default function Finances() {
         );
         const unsubDividends = onSnapshot(dividendQ, (snap) => {
             setDividends(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+            setLoadedPeriods(previous => ({ ...previous, dividends: period }));
         });
 
         // Fetch Savings (All time history for balance)
@@ -122,7 +127,7 @@ export default function Finances() {
             unsubAllStocks();
             unsubAllDividends();
         }
-    }, [user, year]);
+    }, [user, year, period]);
 
     // Derived Logic for Charts
     const yearlyTotals = useMemo(() => {
@@ -320,7 +325,8 @@ export default function Finances() {
 
             {/* VIEWS */}
             {view === 'organization' && user && <MoneyOrganization key={user.uid} userId={user.uid} onDirtyChange={setOrganizationDirty} onBusyChange={setOrganizationBusy} />}
-            {view === 'budget' && (
+            {(view === 'budget' || view === 'investments') && !yearReady && <p role="status" className="text-slate-400">Cargando datos…</p>}
+            {view === 'budget' && yearReady && (
                 <BudgetView
                     year={year}
                     data={financeData}
@@ -330,8 +336,9 @@ export default function Finances() {
                 />
             )}
 
-            {view === 'investments' && (
+            {view === 'investments' && yearReady && (
                 <InvestmentsView
+                    key={period}
                     year={year}
                     stocks={stocks}
                     dividends={dividends}
@@ -350,7 +357,7 @@ export default function Finances() {
             )}
 
             {/* CATEGORY MANAGER MODAL */}
-            {showConfig && (
+            {showConfig && yearReady && (
                 <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="bg-surface border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in-95">
                         <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900">
@@ -655,9 +662,10 @@ const BudgetView = ({ year, data, onUpdate, pieData, totals }) => {
                     <tbody className="divide-y divide-slate-800">
                         {data?.expenseCategories?.map(cat => {
                             let rowTotal = 0;
+                            const isLocked = cat === 'Acciones';
                             return (
                                 <tr key={cat} className="hover:bg-slate-800/30">
-                                    <td className="p-3 font-medium sticky left-0 bg-surface border-r border-slate-700">{cat}</td>
+                                    <td className="p-3 font-medium sticky left-0 bg-surface border-r border-slate-700">{cat}{isLocked && <span className="text-xs text-slate-500 ml-1">(Auto)</span>}</td>
                                     {months.map((_, i) => {
                                         const val = data?.monthly?.[i]?.expenses?.[cat] || 0;
                                         rowTotal += Number(val);
@@ -666,7 +674,8 @@ const BudgetView = ({ year, data, onUpdate, pieData, totals }) => {
                                                 <input
                                                     type="number"
                                                     step="0.01"
-                                                    className={`w-full h-full bg-transparent text-center p-2 outline-none focus:bg-slate-800 transition-colors text-slate-300`}
+                                                    disabled={isLocked}
+                                                    className={`w-full h-full bg-transparent text-center p-2 outline-none transition-colors ${isLocked ? 'text-slate-500 cursor-not-allowed' : 'focus:bg-slate-800 text-slate-300'}`}
                                                     value={val || ''}
                                                     placeholder="-"
                                                     onChange={(e) => onUpdate(i, 'expense', cat, e.target.value)}
@@ -692,20 +701,21 @@ const InvestmentsView = ({ year, stocks, dividends, allStocks, allDividends, use
     const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' }); // Sorting state
 
     // New Stock Form
-    const [sDate, setSDate] = useState(new Date().toISOString().split('T')[0]);
+    const [sDate, setSDate] = useState(year === new Date().getFullYear() ? format(new Date(), 'yyyy-MM-dd') : `${year}-01-01`);
     const [sCompany, setSCompany] = useState("");
     const [sBuy, setSBuy] = useState("");
     const [sSell, setSSell] = useState("");
 
     const handleAddStock = async (e) => {
         e.preventDefault();
-        const profit = Number(sSell) - Number(sBuy);
+        const profit = (Math.round(Number(sSell) * 100) - Math.round(Number(sBuy) * 100)) / 100;
         const roi = (profit / Number(sBuy)) * 100;
 
         if (editingStock) {
             // ESTIMATED: Update existing record
             await updateDoc(doc(db, 'users', userId, 'investments', editingStock.id), {
                 date: sDate,
+                year: Number(sDate.slice(0, 4)),
                 company: sCompany,
                 buyAmount: Number(sBuy),
                 sellAmount: Number(sSell),
@@ -714,46 +724,13 @@ const InvestmentsView = ({ year, stocks, dividends, allStocks, allDividends, use
                 updatedAt: new Date().toISOString()
             });
 
-            // Update Budget (Remove old profit, Add new profit)
-            try {
-                const oldMonth = new Date(editingStock.date).getMonth();
-                const newMonth = new Date(sDate).getMonth();
-                const oldProfit = editingStock.profit;
-
-                if (oldMonth !== newMonth || Math.abs(oldProfit - profit) > 0.01) {
-                    const financeDocRef = doc(db, 'users', userId, 'finance_years', String(year));
-                    await runTransaction(db, async (transaction) => {
-                        const sfDoc = await transaction.get(financeDocRef);
-                        if (!sfDoc.exists()) return;
-                        const data = sfDoc.data();
-                        const monthly = data.monthly || {};
-
-                        // 1. Remove old
-                        if (monthly[oldMonth]?.incomes?.["Acciones"]) {
-                            monthly[oldMonth].incomes["Acciones"] -= oldProfit;
-                        }
-
-                        // 2. Add new
-                        if (!monthly[newMonth]) monthly[newMonth] = { incomes: {}, expenses: {} };
-                        if (!monthly[newMonth].incomes) monthly[newMonth].incomes = {};
-
-                        const currentVal = Number(monthly[newMonth].incomes["Acciones"] || 0);
-                        monthly[newMonth].incomes["Acciones"] = Math.round((currentVal + profit) * 100) / 100;
-
-                        transaction.update(financeDocRef, { monthly });
-                    });
-                }
-            } catch (error) {
-                console.error("Error updating budget on edit:", error);
-            }
-
             setEditingStock(null);
         } else {
             // CREATE new record
             await addDoc(collection(db, 'users', userId, 'investments'), {
                 type: 'sale',
                 date: sDate,
-                year: year,
+                year: Number(sDate.slice(0, 4)),
                 company: sCompany,
                 buyAmount: Number(sBuy),
                 sellAmount: Number(sSell),
@@ -762,40 +739,6 @@ const InvestmentsView = ({ year, stocks, dividends, allStocks, allDividends, use
                 createdAt: new Date().toISOString()
             });
 
-            // Automatically update Monthly Budget
-            try {
-                const saleMonth = new Date(sDate).getMonth(); // 0-11
-                const financeDocRef = doc(db, 'users', userId, 'finance_years', String(year));
-
-                await runTransaction(db, async (transaction) => {
-                    const sfDoc = await transaction.get(financeDocRef);
-                    if (!sfDoc.exists()) return; // Should exist if we are viewing it
-
-                    const data = sfDoc.data();
-
-                    // Ensure 'Acciones' is in incomeCategories
-                    let incomeCategories = data.incomeCategories || [];
-                    if (!incomeCategories.includes("Acciones")) {
-                        incomeCategories.push("Acciones");
-                    }
-
-                    // Prepare nested path safely
-                    const monthly = data.monthly || {};
-                    if (!monthly[saleMonth]) monthly[saleMonth] = { incomes: {}, expenses: {} };
-                    if (!monthly[saleMonth].incomes) monthly[saleMonth].incomes = {};
-
-                    // Add profit to existing value (accummulate)
-                    const currentVal = Number(monthly[saleMonth].incomes["Acciones"] || 0);
-                    monthly[saleMonth].incomes["Acciones"] = Math.round((currentVal + profit) * 100) / 100;
-
-                    transaction.update(financeDocRef, {
-                        incomeCategories,
-                        monthly
-                    });
-                });
-            } catch (error) {
-                console.error("Error updating budget with stock profit:", error);
-            }
         }
 
         setIsAdding(false);
@@ -901,12 +844,12 @@ const InvestmentsView = ({ year, stocks, dividends, allStocks, allDividends, use
 
     const handleDelete = async (id) => {
         if (!confirm('¿Estás seguro de que quieres eliminar este registro?')) return;
-        if (!confirm('⚠️ Confirmación final: ¿Realmente deseas eliminarlo? Esta acción no se restaurará automáticamente en el presupuesto.')) return;
+        if (!confirm(invTab === 'stocks' ? '¿Eliminar la venta y actualizar su importe en el presupuesto?' : '⚠️ Confirmación final: ¿Realmente deseas eliminarlo? Esta acción no se restaurará automáticamente en el presupuesto.')) return;
 
         await deleteDoc(doc(db, 'users', userId, 'investments', id));
     }
 
-    const totalStockProfit = stocks.reduce((acc, curr) => acc + curr.profit, 0);
+    const { gains: totalStockGains, losses: totalStockLosses, total: totalStockProfit } = stockTotals(stocks);
     const totalInvested = stocks.reduce((acc, curr) => acc + curr.buyAmount, 0);
     const totalROI = totalInvested > 0 ? (totalStockProfit / totalInvested) * 100 : 0;
 
@@ -947,23 +890,27 @@ const InvestmentsView = ({ year, stocks, dividends, allStocks, allDividends, use
 
     return (
         <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                 <div onClick={() => setInvTab('stocks')} className={`flex-1 p-4 rounded-xl border cursor-pointer transition-all ${invTab === 'stocks' ? 'bg-amber-500/10 border-amber-500 ring-1 ring-amber-500' : 'bg-surface border-slate-700 hover:border-slate-500'}`}>
                     <div className="flex justify-between items-start">
                         <div>
                             <h3 className="font-medium text-slate-400 text-sm">Plusvalías Ventas</h3>
-                            <p className={`text-2xl font-bold ${totalStockProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{totalStockProfit.toFixed(2)}€</p>
-                        </div>
-                        <div className="text-right">
-                            <span className={`text-xs font-bold px-2 py-1 rounded-full ${totalROI >= 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                                {totalROI >= 0 ? '+' : ''}{totalROI.toFixed(2)}%
-                            </span>
+                            <p className="text-2xl font-bold text-green-400">{totalStockGains.toFixed(2)}€</p>
                         </div>
                     </div>
                     <div className="mt-2 pt-2 border-t border-slate-700/50 flex justify-between text-xs">
                         <span className="text-slate-500">Total Invertido:</span>
                         <span className="text-slate-300 font-mono">{totalInvested.toFixed(2)}€</span>
                     </div>
+                </div>
+                <div onClick={() => setInvTab('stocks')} className="p-4 rounded-xl border border-slate-700 bg-surface cursor-pointer hover:border-slate-500">
+                    <h3 className="font-medium text-slate-400 text-sm">Pérdidas Ventas</h3>
+                    <p className="text-2xl font-bold text-red-400">{totalStockLosses > 0 ? '-' : ''}{totalStockLosses.toFixed(2)}€</p>
+                </div>
+                <div onClick={() => setInvTab('stocks')} className="p-4 rounded-xl border border-slate-700 bg-surface cursor-pointer hover:border-slate-500">
+                    <h3 className="font-medium text-slate-400 text-sm">Total Ventas</h3>
+                    <p className={`text-2xl font-bold ${totalStockProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{totalStockProfit.toFixed(2)}€</p>
+                    <p className="text-xs text-slate-400 mt-2">ROI: {totalROI.toFixed(2)}%</p>
                 </div>
                 <div onClick={() => setInvTab('dividends')} className={`flex-1 p-4 rounded-xl border cursor-pointer transition-all ${invTab === 'dividends' ? 'bg-amber-500/10 border-amber-500 ring-1 ring-amber-500' : 'bg-surface border-slate-700 hover:border-slate-500'}`}>
                     <h3 className="font-medium text-slate-400 text-sm">Total Dividendos</h3>
@@ -1164,7 +1111,7 @@ const InvestmentsView = ({ year, stocks, dividends, allStocks, allDividends, use
                                     )}
                                     <td className="p-3 flex items-center justify-end gap-1">
                                         {invTab === 'stocks' && (
-                                            <button onClick={() => handleEditStock(item)} className="text-slate-600 hover:text-amber-500 p-1"><Edit2 size={16} /></button>
+                                            <button aria-label={`Editar venta ${item.company}`} onClick={() => handleEditStock(item)} className="text-slate-600 hover:text-amber-500 p-1"><Edit2 size={16} /></button>
                                         )}
                                         <button onClick={() => handleDelete(item.id)} className="text-slate-600 hover:text-red-400 p-1"><Trash2 size={16} /></button>
                                     </td>
