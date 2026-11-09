@@ -3,10 +3,12 @@ import { useStore } from '../context/StoreContext';
 import { Plus, Trash2, Search, ChefHat, X, Save, FileText, List, Calendar, AlertTriangle } from 'lucide-react';
 
 export default function Meals() {
-    const { meals, menu, addMeal, updateMealStock, updateMeal, deleteMeal } = useStore();
+    const { meals, menu, addMeal, clearStocks, updateMeal, deleteMeal } = useStore();
     const [showAdd, setShowAdd] = useState(false);
     const [search, setSearch] = useState("");
     const [sortBy, setSortBy] = useState("quantity-asc");
+    const [clearingStocks, setClearingStocks] = useState(false);
+    const [clearError, setClearError] = useState('');
 
     // Detail Modal State
     const [editingMeal, setEditingMeal] = useState(null);
@@ -66,6 +68,20 @@ export default function Meals() {
         setEditingMeal(null);
     };
 
+    const handleClearStocks = async () => {
+        if (!window.confirm('¿Poner a cero el stock de todas las comidas del hogar? Se conservarán las recetas y el menú.')) return;
+        setClearingStocks(true);
+        setClearError('');
+        try {
+            await clearStocks();
+        } catch (error) {
+            console.error('Error clearing meal stocks:', error);
+            setClearError('No se pudo limpiar todo el stock. Inténtalo de nuevo.');
+        } finally {
+            setClearingStocks(false);
+        }
+    };
+
     const filteredMeals = useMemo(() => {
         const compareByName = (a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
 
@@ -120,6 +136,18 @@ export default function Meals() {
                     <option value="quantity-desc">Más stock</option>
                     <option value="name">Nombre A-Z</option>
                 </select>
+            </div>
+
+            <div className="flex flex-col items-end gap-2">
+                <button
+                    type="button"
+                    onClick={handleClearStocks}
+                    disabled={clearingStocks || meals.length === 0}
+                    className="text-sm font-medium text-red-400 hover:text-red-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    {clearingStocks ? 'Limpiando stock...' : 'Limpiar stocks'}
+                </button>
+                {clearError && <p role="alert" className="text-sm text-red-400">{clearError}</p>}
             </div>
 
             {/* Add Form */}

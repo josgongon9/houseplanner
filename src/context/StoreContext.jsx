@@ -7,6 +7,7 @@ import {
 
 import { generateDueRecurringExpenses } from '../lib/recurringExpenses';
 import { editExpenseRecord, deleteExpenseRecord, editRecurringRecord } from '../lib/expenseRepository';
+import { clearMealStock } from '../lib/mealStockRepository';
 import useRecurringSchedule from '../hooks/useRecurringSchedule';
 
 const StoreContext = createContext();
@@ -327,6 +328,11 @@ export const StoreProvider = ({ children }) => {
         await updateDoc(doc(db, "meals", id), { quantity: Number(quantity) });
     };
 
+    const clearStocks = async () => {
+        if (!user || !household) throw new Error('No hay un hogar seleccionado.');
+        await clearMealStock(household.id);
+    };
+
     const updateMeal = async (id, data) => {
         if (!user) return;
         await updateDoc(doc(db, "meals", id), data);
@@ -630,7 +636,7 @@ export const StoreProvider = ({ children }) => {
             user, userData, userRole, household, householdMembers, login, logout,
             createHousehold, joinHousehold,
             meals, menu, expenses, recurringExpenses,
-            addMeal, updateMealStock, updateMeal, deleteMeal, setMenuItem, addExpense, updateExpense, deleteExpense,
+            addMeal, updateMealStock, clearStocks, updateMeal, deleteMeal, setMenuItem, addExpense, updateExpense, deleteExpense,
             addRecurringExpense, updateRecurringExpense, deleteRecurringExpense, generateRecurringExpenses,
             addExpenseCategory, deleteExpenseCategory, updateAllExpenseCategories, updateHouseStatsCategories, updateHouseStatsPeriod, updateHouseStatsCategoryColor, updateHouseStatsPersons,
             // User Actions

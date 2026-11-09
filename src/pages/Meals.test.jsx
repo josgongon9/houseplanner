@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import Meals from '../pages/Meals';
 import * as StoreContext from '../context/StoreContext';
 
@@ -126,6 +126,32 @@ describe('Meals Component', () => {
 
         expect(screen.getByText('Lentejas')).toBeInTheDocument();
         expect(screen.queryByText('Sopa')).not.toBeInTheDocument();
+    });
+
+    it('confirms before clearing all stocks, even when the list is filtered', async () => {
+        const clearStocks = vi.fn().mockResolvedValue();
+        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+        StoreContext.useStore.mockReturnValue({ meals: mockMeals, menu: [], clearStocks });
+        render(<Meals />);
+        fireEvent.change(screen.getByPlaceholderText('Buscar...'), { target: { value: 'lent' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Limpiar stocks' }));
+        expect(clearStocks).not.toHaveBeenCalled();
+        confirmSpy.mockReturnValue(true);
+        fireEvent.click(screen.getByRole('button', { name: 'Limpiar stocks' }));
+        await waitFor(() => expect(clearStocks).toHaveBeenCalledOnce());
+        expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('todas las comidas'));
+        confirmSpy.mockRestore();
+    });
+
+    it('shows an error when clearing stocks fails', async () => {
+        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        StoreContext.useStore.mockReturnValue({ meals: mockMeals, menu: [], clearStocks: vi.fn().mockRejectedValue(new Error('offline')) });
+        render(<Meals />);
+        fireEvent.click(screen.getByRole('button', { name: 'Limpiar stocks' }));
+        expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo limpiar todo el stock');
+        confirmSpy.mockRestore();
+        errorSpy.mockRestore();
     });
 
     it('opens recipe modal and allows stock adjustment', () => {
