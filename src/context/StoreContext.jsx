@@ -100,7 +100,10 @@ export const StoreProvider = ({ children }) => {
         // We set up a listener for the household itself (in case name changes etc)
         householdListenerRef.current = onSnapshot(doc(db, "households", householdId), (doc) => {
             if (doc.exists()) {
-                setHousehold({ id: doc.id, ...doc.data() });
+                // Casa subscribes independently; its writes must not restart meal/expense effects.
+                const householdData = { id: doc.id, ...doc.data() };
+                delete householdData.houseModule;
+                setHousehold(previous => JSON.stringify(previous) === JSON.stringify(householdData) ? previous : householdData);
             } else {
                 setHousehold(null); // Should handle "removed from home" scenario here
             }
@@ -601,6 +604,11 @@ export const StoreProvider = ({ children }) => {
         // The listener in useEffect will handle the context switch
     }
 
+    const toggleHouseModule = async (enabled) => {
+        if (!user) return;
+        await updateDoc(doc(db, "users", user.uid), { houseEnabled: enabled });
+    };
+
     const toggleFinanceModule = async (enabled) => {
         if (!user) return;
         await updateDoc(doc(db, "users", user.uid), { financeEnabled: enabled });
@@ -644,7 +652,7 @@ export const StoreProvider = ({ children }) => {
             // Admin exports
             adminAddUserToHousehold, adminCreateHousehold, adminUpdateHousehold, adminSwitchHousehold, adminCreateGhostUser,
             adminDeleteUser, adminDeleteHousehold,
-            toggleFinanceModule,
+            toggleFinanceModule, toggleHouseModule,
             isLoading
         }}>
             {children}

@@ -10,6 +10,7 @@ import Expenses from './pages/Expenses';
 import HouseholdSetup from './pages/HouseholdSetup';
 import Profile from './pages/Profile';
 import Finances from './pages/Finances';
+import House from './pages/House';
 import { Loader2 } from 'lucide-react';
 
 const ProtectedRoute = ({ children, requireAdmin, requireAuth = true }) => {
@@ -87,6 +88,7 @@ function App() {
                                     <Finances />
                                 </ProtectedRoute>
                             } />
+                            <Route path="/house" element={<ProtectedRoute><House /></ProtectedRoute>} />
                             <Route path="/admin" element={
                                 <ProtectedRoute requireAdmin>
                                     <Admin />

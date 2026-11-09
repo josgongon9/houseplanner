@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { CalendarDays, UtensilsCrossed, Shield, Wallet, User } from 'lucide-react';
+import { CalendarDays, UtensilsCrossed, Shield, Wallet, User, Home } from 'lucide-react';
 import clsx from 'clsx';
 import { useStore } from '../context/StoreContext';
 
@@ -24,6 +24,7 @@ export default function BottomNav() {
                     <span className="text-[10px] font-medium">Gastos</span>
                 </Link>
 
+                {userData?.houseEnabled && <Link to="/house" className={clsx("flex flex-col items-center gap-1 p-2 w-full", currentPath === "/house" ? "text-emerald-400" : "text-slate-400")}><Home size={20} /><span className="text-[10px] font-medium">Casa</span></Link>}
                 {/* FINANCE MODULE LINK */}
                 {userData?.financeEnabled && (
                     <Link to="/finances" className={clsx("flex flex-col items-center gap-1 p-2 w-full", currentPath === "/finances" ? "text-primary" : "text-amber-500/50")}>
